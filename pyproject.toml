@@ -2,7 +2,12 @@
 name = "recovery-economics"
 version = "0.1.0"
 description = "A FinOps decision-stress model for cloud recovery economics."
+readme = "README.md"
 requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+recovery-economics = "recovery_economics.cli:main"
 
 [tool.black]
 line-length = 88
