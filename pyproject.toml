@@ -1,0 +1,9 @@
+[project]
+name = "recovery-economics"
+version = "0.1.0"
+description = "A FinOps decision-stress model for cloud recovery economics."
+requires-python = ">=3.10"
+
+[tool.black]
+line-length = 88
+
