@@ -39,4 +39,3 @@ def get_default_pricing(storage_tier: str) -> AwsRestorePricing:
     if tier not in DEFAULT_AWS_PRICING:
         raise ValueError(f"Unsupported storage_tier: {storage_tier}")
     return DEFAULT_AWS_PRICING[tier]
-

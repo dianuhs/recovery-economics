@@ -33,7 +33,11 @@ def main() -> None:
     )
     result = estimate_restore(inputs, pricing)
 
-    payload = {"inputs": asdict(inputs), "pricing": asdict(pricing), "result": asdict(result)}
+    payload = {
+        "inputs": asdict(inputs),
+        "pricing": asdict(pricing),
+        "result": asdict(result),
+    }
 
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -56,4 +60,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

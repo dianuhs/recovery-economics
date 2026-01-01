@@ -40,7 +40,9 @@ def _validate(inputs: RestoreInputs) -> None:
         raise ValueError("rto_hours must be > 0 if provided")
 
 
-def transfer_time_hours(data_size_gb: float, bandwidth_mbps: float, efficiency: float) -> float:
+def transfer_time_hours(
+    data_size_gb: float, bandwidth_mbps: float, efficiency: float
+) -> float:
     """
     Transfer time in hours using effective throughput = bandwidth_mbps * efficiency.
     v1 approximation: 1 GB = 1e9 bytes (documented).
@@ -51,7 +53,9 @@ def transfer_time_hours(data_size_gb: float, bandwidth_mbps: float, efficiency: 
     return seconds / 3600.0
 
 
-def estimate_restore(inputs: RestoreInputs, pricing: AwsRestorePricing) -> RestoreResult:
+def estimate_restore(
+    inputs: RestoreInputs, pricing: AwsRestorePricing
+) -> RestoreResult:
     _validate(inputs)
     dest = inputs.restore_destination.strip().lower()
 
@@ -65,7 +69,9 @@ def estimate_restore(inputs: RestoreInputs, pricing: AwsRestorePricing) -> Resto
     total_cost = retrieval_cost + egress_cost
 
     thaw = pricing.thaw_hours
-    transfer = transfer_time_hours(inputs.data_size_gb, inputs.bandwidth_mbps, inputs.link_efficiency)
+    transfer = transfer_time_hours(
+        inputs.data_size_gb, inputs.bandwidth_mbps, inputs.link_efficiency
+    )
     total_time = thaw + transfer
 
     if inputs.rto_hours is None:
@@ -83,4 +89,3 @@ def estimate_restore(inputs: RestoreInputs, pricing: AwsRestorePricing) -> Resto
         rto_hours=inputs.rto_hours,
         rto_mismatch=mismatch,
     )
-
