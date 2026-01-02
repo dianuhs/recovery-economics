@@ -44,18 +44,6 @@ Recovery Economics makes those tradeoffs explicit **before** a failure occurs.
 
 ---
 
-## What v1 intentionally does NOT do
-
-- No cloud authentication (IAM, OIDC, API keys)
-- No live account connections
-- No multi-cloud claims
-- No dashboards or UI
-- No optimization recommendations
-
-v1 focuses on modeling **consequences**, not managing infrastructure.
-
----
-
 ## Install (development)
 
 ```bash
