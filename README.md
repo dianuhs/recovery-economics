@@ -1,113 +1,113 @@
-# Recovery Economics (v1)
+RECOVERY ECONOMICS
 
-A small, auditable FinOps model that estimates **restore cost and restore time**
-for archival storage recovery.
+Recovery Economics is a small, opinionated tool for stress-testing cloud backup and restore decisions.
 
-This project is intentionally **not** a dashboard and **not** a cloud connection tool.
-It is a decision-stress model that answers a simple but commonly missed question:
+It focuses on a part of cloud cost optimization that often gets glossed over:
+what actually happens when you need your data back.
 
-> What does this storage decision cost when you actually need the data back?
 
----
+WHY THIS EXISTS
 
-## Why this exists
+Cold storage is usually treated as a straightforward cost win.
+Move data to cheaper tiers, reduce monthly spend, move on.
 
-Storage optimization is heavily modeled in cloud cost management.
-The **cost of recovery** and **time-to-restore** are usually not modeled until a real
-incident forces the math.
+But recovery is where those decisions get tested.
 
-This leads teams to optimize for low $/GB while quietly accepting:
-- long restore times
-- unexpected egress bills
-- missed RTOs during incidents
+When an incident happens:
+- retrieval fees show up
+- egress costs matter
+- bandwidth and efficiency stop being theoretical
+- recovery time becomes the real constraint
 
-Recovery Economics makes those tradeoffs explicit **before** a failure occurs.
+Recovery Economics makes those tradeoffs explicit so storage decisions can be evaluated as risk decisions, not just line items on a bill.
 
----
 
-## What v1 does
+WHAT IT DOES
 
-- Models AWS restore scenarios for:
-  - `glacier`
-  - `deep_archive`
-- Supports two restore destinations:
-  - `internet` (Data Transfer Out, max-pain baseline)
-  - `intra_aws` (simplified baseline)
-- Calculates:
-  - retrieval cost
-  - egress cost
-  - total restore cost
-  - thaw time
-  - transfer time (with link efficiency)
-  - total time to availability
-  - optional RTO mismatch
+Recovery Economics models the real-world economics of restoring data from cold storage, including:
 
----
+- retrieval and egress costs
+- thaw times for cold tiers
+- bandwidth and link efficiency assumptions
+- recovery time versus stated RTO
+- scenario-based defaults that reflect how restores actually happen
+- side-by-side comparison of different choices
+- plain-language decision summaries
 
-## Install (development)
+The model is deterministic and auditable. All assumptions are visible.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
 
----
+EXAMPLE: RANSOMWARE RESTORE
 
-## Run
+Command:
 
-Example: restore **5 TB** from Deep Archive to the Internet over a **1 Gbps** link,
-assuming **70% efficiency** and a **24-hour RTO**.
-
-```bash
 recovery-economics \
+  --scenario ransomware \
   --tier deep_archive \
-  --destination internet \
   --size-gb 5000 \
-  --bandwidth-mbps 1000 \
-  --efficiency 0.70 \
-  --rto-hours 24
-```
+  --compare \
+  --compare-tier glacier
 
-JSON output:
 
-```bash
-recovery-economics \
-  --tier deep_archive \
-  --destination internet \
-  --size-gb 5000 \
-  --bandwidth-mbps 1000 \
-  --rto-hours 24 \
-  --json
-```
+Excerpt from the output:
 
----
+Decision Narrative
+-----------------
+This restore misses your RTO by 3.87 hours (27.87h vs 24.00h).
+Storage for deep_archive at 5,000 GB is ~$4.95/month.
+This is the trade: cheaper storage can quietly turn into slower recovery when you actually need it.
 
-## Assumptions (v1)
+Compare Insights
+---------------
+Storage: B costs +$13.05/month more than A.
+Restore event: B is -$50.00 cheaper than A.
+Recovery time: B is -8.00h faster.
 
-- Transfer time uses effective throughput:
-  `bandwidth_mbps × link_efficiency`
-- v1 approximates `1 GB = 1e9 bytes` for clarity and auditability
-- Pricing defaults are explicit in code and overrideable
+This reframes storage optimization as a balance between monthly savings and recovery risk.
 
----
 
-## Tests
+SCENARIOS
 
-```bash
-pytest
-```
+The tool includes scenario presets that apply realistic defaults:
 
----
+- ransomware
+- region_failure
+- accidental_delete
+- test_restore
 
-## Roadmap
+Each scenario sets expectations for urgency, destination, bandwidth, and efficiency.
+All values can be overridden explicitly.
 
-This project is intentionally narrow. Future iterations will stay focused on
-**auditable, decision-oriented modeling**, not platform features.
 
-Planned improvements:
-- Replace pricing defaults with sourced AWS tier and region tables
-- Add request-level cost components where applicable
-- Add a simple sensitivity view (bandwidth and efficiency ranges)
-- Expand Recovery Economics beyond restore scenarios to other high-risk cost events
+COMPARISON MODE
 
+Recovery Economics can compare two decisions directly, such as:
+
+- Deep Archive vs Glacier
+- Internet restore vs intra-AWS restore
+- Different bandwidth assumptions
+
+The comparison highlights:
+- cost differences
+- recovery time differences
+- RTO impact
+- how storage savings compare to recovery penalties
+
+This makes it easier to answer a simple question:
+Was the savings worth it?
+
+
+WHO THIS IS FOR
+
+- FinOps practitioners
+- cloud cost and infrastructure engineers
+- teams thinking about backup, DR, and recovery planning
+- anyone translating between finance, engineering, and operational risk
+
+
+PROJECT STATUS
+
+This is an intentionally focused project.
+
+The goal is clarity, not coverage.
+Depth over breadth.
