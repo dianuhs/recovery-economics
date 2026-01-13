@@ -1,6 +1,6 @@
 # Recovery Economics
 
-Recovery Economics is a small, opinionated tool for stress-testing cloud backup and restore decisions.
+Recovery Economics is a tool for stress-testing cloud backup and restore decisions.
 
 It focuses on a part of cloud cost optimization that often gets glossed over:  
 what actually happens when you need your data back.
