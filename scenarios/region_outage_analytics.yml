@@ -1,0 +1,41 @@
+name: Region-wide AWS outage – analytics platform
+business_unit: Data & Analytics
+
+parameters:
+  rto_minutes: 240                # 4-hour RTO for analytics
+  rpo_minutes: 60                 # 1-hour RPO
+  cost_per_minute_outage: 5000   # $5k/minute = $300k/hour
+  detection_delay_minutes: 30
+  incident_frequency_per_year: 0.1   # Once every 10 years
+  planning_horizon_years: 10
+  regulatory_penalty_probability: 0.1
+  regulatory_penalty_amount: 1000000
+  discount_rate_annual: 0.08
+
+strategies:
+  warm_secondary:
+    description: "Warm secondary region with periodic replication and runbooks exercised quarterly."
+    restore:
+      tier: glacier
+      size_gb: 10000
+      destination: intra_aws
+      bandwidth_mbps: 5000
+      efficiency: 0.8
+
+  cold_secondary:
+    description: "Cold standby region with infrequent testing and slower manual cutover."
+    restore:
+      tier: deep_archive
+      size_gb: 10000
+      destination: internet
+      bandwidth_mbps: 1000
+      efficiency: 0.6
+
+  analytics_only:
+    description: "Minimal core analytics restore for executive dashboards and compliance reporting only."
+    restore:
+      tier: glacier
+      size_gb: 2500
+      destination: intra_aws
+      bandwidth_mbps: 3000
+      efficiency: 0.85

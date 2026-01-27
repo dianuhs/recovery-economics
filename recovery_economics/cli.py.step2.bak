@@ -1,0 +1,140 @@
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import sys
+from dataclasses import asdict
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
+import yaml
+
+from .aws_pricing import get_default_pricing
+from .model import RestoreInputs, estimate_restore
+
+HISTORY_FILE = pathlib.Path("history.jsonl")
+
+def load_scenario(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+def compute_downtime(total_time_hours: float, detection_lag_hours: float, rto_hours: Optional[float], cost_per_hour: Optional[float]):
+    end_to_end = total_time_hours + max(0.0, detection_lag_hours or 0.0)
+    if rto_hours is None or cost_per_hour is None:
+        return 0.0, 0.0, end_to_end
+    miss = max(0.0, end_to_end - rto_hours)
+    return miss, miss * cost_per_hour, end_to_end
+
+def log_decision(record: Dict[str, Any]) -> None:
+    try:
+        with HISTORY_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="recovery-economics")
+    p.add_argument("--tier", choices=["glacier", "deep_archive"])
+    p.add_argument("--size-gb", type=float)
+    p.add_argument("--destination", choices=["internet", "intra_aws"])
+    p.add_argument("--bandwidth-mbps", type=float)
+    p.add_argument("--efficiency", type=float)
+    p.add_argument("--rto-hours", type=float)
+    p.add_argument("--downtime-cost-per-hour", type=float)
+    p.add_argument("--detection-lag-hours", type=float)
+    p.add_argument("--scenario-file", type=str)
+    p.add_argument("--strategy", type=str)
+    return p
+
+def main() -> None:
+    args = build_parser().parse_args()
+
+    if args.scenario_file:
+        scenario = load_scenario(args.scenario_file)
+        print("Recovery Economics — Scenario Mode")
+        print("----------------------------------")
+        print(f"Loaded scenario: {scenario.get('name')}")
+        print(f"Business unit: {scenario.get('business_unit')}")
+
+        params = scenario.get("parameters", {})
+        strategies = scenario.get("strategies", {})
+
+        if not args.strategy:
+            print("\nStrategies:")
+            for k, v in strategies.items():
+                print(f"- {k}: {v.get('description')}")
+            print("\n[Scenario-only mode] No restore calculations run yet.")
+            return
+
+        strat = strategies[args.strategy]
+        restore = strat["restore"]
+
+        tier = restore["tier"]
+        size_gb = restore["size_gb"]
+        destination = restore["destination"]
+        bandwidth = restore["bandwidth_mbps"]
+        efficiency = restore.get("efficiency", 0.7)
+
+        rto_hours = params.get("rto_minutes", 0) / 60.0
+        detection_lag_hours = params.get("detection_delay_minutes", 0) / 60.0
+        cost_per_hour = params.get("cost_per_minute_outage", 0) * 60.0
+
+        pricing = get_default_pricing(tier)
+        inputs = RestoreInputs(
+            data_size_gb=size_gb,
+            bandwidth_mbps=bandwidth,
+            link_efficiency=efficiency,
+            restore_destination=destination,
+            rto_hours=rto_hours,
+        )
+        result = estimate_restore(inputs, pricing)
+
+        rto_miss, loss, end_to_end = compute_downtime(
+            result.total_time_hours,
+            detection_lag_hours,
+            rto_hours,
+            cost_per_hour,
+        )
+
+        print(f"\nStrategy: {args.strategy}")
+        print(f"Tier: {tier} → {destination}")
+        print(f"Total restore time: {result.total_time_hours:.2f}h")
+        print(f"End-to-end downtime: {end_to_end:.2f}h")
+        print(f"RTO: {rto_hours:.2f}h")
+        print(f"RTO miss: {rto_miss:.2f}h")
+        print(f"Estimated downtime loss: ${loss:,.2f}")
+
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "scenario": scenario.get("name"),
+            "strategy": args.strategy,
+            "tier": tier,
+            "destination": destination,
+            "size_gb": size_gb,
+            "total_time_hours": result.total_time_hours,
+            "end_to_end_downtime_hours": end_to_end,
+            "rto_miss_hours": rto_miss,
+            "estimated_downtime_loss_usd": loss,
+        }
+        log_decision(record)
+        return
+
+    if args.tier is None or args.size_gb is None:
+        raise SystemExit("Normal mode requires --tier and --size-gb")
+
+    pricing = get_default_pricing(args.tier)
+    inputs = RestoreInputs(
+        data_size_gb=args.size_gb,
+        bandwidth_mbps=args.bandwidth_mbps,
+        link_efficiency=args.efficiency or 0.7,
+        restore_destination=args.destination,
+        rto_hours=args.rto_hours,
+    )
+    result = estimate_restore(inputs, pricing)
+    print(f"Total restore time: {result.total_time_hours:.2f}h")
+
+if __name__ == "__main__":
+    main()

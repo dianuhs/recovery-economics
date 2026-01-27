@@ -67,18 +67,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Compare all strategies defined in the scenario file.",
     )
 
-    # Output / extra helpers
-    p.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable JSON instead of human text.",
-    )
-    p.add_argument(
-        "--ai-narrative",
-        action="store_true",
-        help="Print a short human-readable summary for a single strategy.",
-    )
-
     return p
 
 
@@ -255,63 +243,15 @@ def print_compare(records: List[Dict[str, Any]]) -> None:
         total_risk = rec['total_risk_per_event_usd']
         exp_horizon = rec.get('expected_total_risk_over_horizon_usd')
 
-        exp_str = f"${exp_horizon:,.0f}" if exp_horizon is not None else "n/a"
+        exp_str = (
+            f"${exp_horizon:,.0f}" if exp_horizon is not None else "n/a"
+        )
 
         print(
             f"{rec['strategy']:<14} {tier_dest:<24} "
             f"{rec['end_to_end_downtime_hours']:>8.2f} {rec['rto_miss_hours']:>12.2f} "
             f"${downtime:>14,.0f} ${total_risk:>16,.0f} {exp_str:>18}"
         )
-
-
-def generate_narrative(record: Dict[str, Any]) -> str:
-    """Generate a short, human-readable summary for a single strategy.
-
-    No external API calls, just templated text in a FinOps / SRE-friendly tone.
-    """
-    scenario = record.get("scenario") or "this scenario"
-    bu = record.get("business_unit") or "this business unit"
-    strategy = record.get("strategy") or "this strategy"
-    tier = record.get("tier")
-    dest = record.get("destination")
-    e2e = record.get("end_to_end_downtime_hours") or 0.0
-    rto = record.get("rto_hours") or 0.0
-    miss = record.get("rto_miss_hours") or 0.0
-    per_event = record.get("total_risk_per_event_usd") or 0.0
-    horizon = record.get("expected_total_risk_over_horizon_usd")
-    incidents = record.get("incident_frequency_per_year")
-    years = record.get("planning_horizon_years")
-
-    lines = []
-
-    lines.append(
-        f"For '{scenario}' in {bu}, the '{strategy}' path on {tier} → {dest} "
-        f"drives about {e2e:.1f} hours of end-to-end downtime against a "
-        f"{rto:.1f}-hour RTO target."
-    )
-
-    if miss > 0.0:
-        lines.append(
-            f"That leaves roughly {miss:.1f} hours of RTO miss in the tail "
-            f"of a serious incident."
-        )
-    else:
-        lines.append(
-            "On these assumptions, the modeled downtime stays within the stated RTO target."
-        )
-
-    lines.append(
-        f"Putting a price on it, the modeled risk is around ${per_event:,.0f} "
-        f"per ransomware event when you combine downtime and expected penalties."
-    )
-
-    if horizon is not None and incidents is not None and years is not None:
-        lines.append(
-            f"Over a {years:.0f}-year planning window at about {incidents:.2f} events per year, "
-            f"that translates into roughly ${horizon:,.0f} of expected loss for this strategy."
-        )
-
-    return " ".join(lines)
 
 
 # ---------- Main ----------
@@ -326,11 +266,11 @@ def main() -> None:
 
         # Compare all strategies
         if args.compare_strategies:
-            records = [evaluate_strategy(scenario, sid) for sid in strategies.keys()]
-            if args.json:
-                print(json.dumps(records, indent=2))
-            else:
-                print_compare(records)
+            records = [
+                evaluate_strategy(scenario, sid)
+                for sid in strategies.keys()
+            ]
+            print_compare(records)
             for rec in records:
                 log_decision(rec)
             return
@@ -349,25 +289,13 @@ def main() -> None:
 
         # Single strategy evaluation
         record = evaluate_strategy(scenario, args.strategy)
-        if args.json:
-            print(json.dumps(record, indent=2))
-            log_decision(record)
-            return
-
         print_single_strategy(record)
-        if args.ai_narrative:
-            print("\nAI-style Narrative")
-            print("-------------------")
-            print(generate_narrative(record))
-
         log_decision(record)
         return
 
     # Normal mode (backwards-compatible simple run)
     if args.tier is None or args.size_gb is None:
-        raise SystemExit(
-            "Normal mode requires --tier and --size-gb when no scenario-file is given."
-        )
+        raise SystemExit("Normal mode requires --tier and --size-gb when no scenario-file is given.")
 
     pricing = get_default_pricing(args.tier)
     inputs = RestoreInputs(
@@ -378,29 +306,6 @@ def main() -> None:
         rto_hours=args.rto_hours,
     )
     result = estimate_restore(inputs, pricing)
-
-    if args.json:
-        payload = {
-            "inputs": {
-                "tier": args.tier,
-                "size_gb": args.size_gb,
-                "destination": args.destination,
-                "bandwidth_mbps": args.bandwidth_mbps,
-                "efficiency": args.efficiency or 0.7,
-                "rto_hours": args.rto_hours,
-            },
-            "result": {
-                "thaw_time_hours": result.thaw_time_hours,
-                "transfer_time_hours": result.transfer_time_hours,
-                "total_time_hours": result.total_time_hours,
-                "retrieval_cost_usd": result.retrieval_cost_usd,
-                "egress_cost_usd": result.egress_cost_usd,
-                "total_cost_usd": result.total_cost_usd,
-            },
-        }
-        print(json.dumps(payload, indent=2))
-        return
-
     print(f"Total restore time: {result.total_time_hours:.2f}h")
 
 

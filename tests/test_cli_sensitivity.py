@@ -1,21 +1,16 @@
 import subprocess
-import sys
 
 
-def test_cli_sensitivity_runs():
+def test_cli_scenario_compare_runs():
     cmd = [
         "recovery-economics",
-        "--tier",
-        "deep_archive",
-        "--destination",
-        "internet",
-        "--size-gb",
-        "5000",
-        "--bandwidth-mbps",
-        "1000",
-        "--rto-hours",
-        "24",
-        "--sensitivity",
+        "--scenario-file",
+        "scenarios/ransomware_fast_recovery.yml",
+        "--compare-strategies",
     ]
     out = subprocess.check_output(cmd, text=True)
-    assert "Sensitivity Analysis" in out
+    # Basic sanity checks on the output
+    assert "Recovery Economics — Scenario Strategy Comparison" in out
+    assert "ai_assisted" in out
+    assert "manual_only" in out
+    assert "hybrid" in out

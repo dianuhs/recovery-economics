@@ -1,0 +1,42 @@
+
+name: Ransomware – fast recovery
+business_unit: Core Payments
+
+parameters:
+  rto_minutes: 60
+  rpo_minutes: 15
+  cost_per_minute_outage: 20000
+  detection_delay_minutes: 20
+  incident_frequency_per_year: 0.2
+  planning_horizon_years: 5
+  regulatory_penalty_probability: 0.3
+  regulatory_penalty_amount: 2000000
+  discount_rate_annual: 0.08
+
+strategies:
+  ai_assisted:
+    description: AI-assisted runbook with pre-validated automation and human approval on high-risk steps.
+    restore:
+      tier: glacier
+      size_gb: 2000
+      destination: intra_aws
+      bandwidth_mbps: 2000
+      efficiency: 0.85
+
+  manual_only:
+    description: Traditional manual runbook with human coordination across teams.
+    restore:
+      tier: deep_archive
+      size_gb: 2000
+      destination: internet
+      bandwidth_mbps: 500
+      efficiency: 0.6
+
+  hybrid:
+    description: Hybrid model with AI suggestions but manual execution of most steps.
+    restore:
+      tier: glacier
+      size_gb: 2000
+      destination: internet
+      bandwidth_mbps: 1000
+      efficiency: 0.7

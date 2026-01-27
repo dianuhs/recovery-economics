@@ -1,21 +1,29 @@
+[build-system]
+requires = ["setuptools>=64.0.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "recovery-economics"
 version = "0.1.0"
-description = "A FinOps decision-stress model for cloud recovery economics."
+description = "Scenario-driven modeling of cloud backup and recovery risk for AWS cold storage."
 readme = "README.md"
-requires-python = ">=3.10"
-dependencies = []
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+  { name = "Diana" }
+]
+keywords = ["finops", "cloud", "aws", "backup", "recovery", "risk", "rto"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+]
 
-[project.optional-dependencies]
-dev = ["pytest>=8.0.0", "black>=24.0.0"]
+dependencies = []
 
 [project.scripts]
 recovery-economics = "recovery_economics.cli:main"
 
-[tool.black]
-line-length = 88
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
+[tool.setuptools]
+packages = ["recovery_economics"]
 
