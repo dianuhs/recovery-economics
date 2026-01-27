@@ -1,0 +1,27 @@
+id: accidental_delete_production
+name: Accidental delete – production data
+category: operational
+business_unit: Analytics Platform
+description: >
+  Accidental deletion of production datasets by an internal operator.
+  High frequency, low drama, but economically meaningful over time.
+
+assumptions:
+  rto_minutes: 180
+  rpo_minutes: 60
+  detection_delay_minutes: 10
+  cost_per_minute_outage: 6000
+  incident_frequency_per_year: 2.0
+  planning_horizon_years: 3
+  regulatory_penalty:
+    probability: 0.0
+    amount_usd: 0
+  discount_rate_annual: 0.08
+
+strategies:
+  standard_restore:
+    description: Standard restore from cold storage.
+    tier: glacier
+    destination: intra_aws
+    bandwidth_mbps: 1200
+    efficiency: 0.8

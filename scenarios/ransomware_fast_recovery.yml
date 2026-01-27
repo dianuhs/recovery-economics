@@ -1,42 +1,42 @@
-
+id: ransomware_fast_recovery
 name: Ransomware – fast recovery
+category: security
 business_unit: Core Payments
+description: >
+  High-severity ransomware incident with rapid detection and aggressive
+  recovery targets. Designed to expose the economic cost of missing tight RTOs
+  even when backups technically succeed.
 
-parameters:
+assumptions:
   rto_minutes: 60
   rpo_minutes: 15
-  cost_per_minute_outage: 20000
   detection_delay_minutes: 20
+  cost_per_minute_outage: 20000
   incident_frequency_per_year: 0.2
   planning_horizon_years: 5
-  regulatory_penalty_probability: 0.3
-  regulatory_penalty_amount: 2000000
+  regulatory_penalty:
+    probability: 0.3
+    amount_usd: 2000000
   discount_rate_annual: 0.08
 
 strategies:
   ai_assisted:
-    description: AI-assisted runbook with pre-validated automation and human approval on high-risk steps.
-    restore:
-      tier: glacier
-      size_gb: 2000
-      destination: intra_aws
-      bandwidth_mbps: 2000
-      efficiency: 0.85
+    description: AI-assisted runbook with pre-validated automation.
+    tier: glacier
+    destination: intra_aws
+    bandwidth_mbps: 2000
+    efficiency: 0.85
 
   manual_only:
-    description: Traditional manual runbook with human coordination across teams.
-    restore:
-      tier: deep_archive
-      size_gb: 2000
-      destination: internet
-      bandwidth_mbps: 500
-      efficiency: 0.6
+    description: Fully manual recovery with cross-team coordination.
+    tier: deep_archive
+    destination: internet
+    bandwidth_mbps: 500
+    efficiency: 0.6
 
   hybrid:
-    description: Hybrid model with AI suggestions but manual execution of most steps.
-    restore:
-      tier: glacier
-      size_gb: 2000
-      destination: internet
-      bandwidth_mbps: 1000
-      efficiency: 0.7
+    description: AI guidance with mostly manual execution.
+    tier: glacier
+    destination: internet
+    bandwidth_mbps: 1000
+    efficiency: 0.7

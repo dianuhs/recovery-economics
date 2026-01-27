@@ -1,0 +1,41 @@
+name: "Quarterly DR test - core services"
+business_unit: "Resilience Engineering"
+
+parameters:
+  rto_minutes: 240               # 4-hour DR test target
+  rpo_minutes: 60
+  cost_per_minute_outage: 5000   # Impact of test windows / partial service impact
+  detection_delay_minutes: 0
+  regulatory_penalty_probability: 0.0
+  regulatory_penalty_amount: 0
+  discount_rate_annual: 0.08
+  incident_frequency_per_year: 4.0   # Quarterly test program
+  planning_horizon_years: 3
+
+strategies:
+  ai_assisted:
+    description: "AI-assisted DR runbook with pre-validated playbooks, automated checks, and human approval on rollback and cutover decisions."
+    restore:
+      tier: glacier
+      destination: intra_aws
+      size_gb: 10000        # 10 TB exercised in tests
+      bandwidth_mbps: 2000
+      efficiency: 0.85
+
+  hybrid:
+    description: "Glacier with internet restore: AI suggestions for step ordering, manual execution and verification by SRE and app owners."
+    restore:
+      tier: glacier
+      destination: internet
+      size_gb: 10000
+      bandwidth_mbps: 1000
+      efficiency: 0.75
+
+  manual_only:
+    description: "Deep Archive with manual coordination: tickets, hand-maintained spreadsheets, and human-led restore sequencing."
+    restore:
+      tier: deep_archive
+      destination: internet
+      size_gb: 10000
+      bandwidth_mbps: 500
+      efficiency: 0.60

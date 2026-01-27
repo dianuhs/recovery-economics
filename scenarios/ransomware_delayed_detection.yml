@@ -1,0 +1,34 @@
+id: ransomware_delayed_detection
+name: Ransomware – delayed detection
+category: security
+business_unit: Core Payments
+description: >
+  Ransomware incident where detection is delayed, causing downtime to be driven
+  by awareness and response rather than restore mechanics.
+
+assumptions:
+  rto_minutes: 120
+  rpo_minutes: 30
+  detection_delay_minutes: 240
+  cost_per_minute_outage: 18000
+  incident_frequency_per_year: 0.15
+  planning_horizon_years: 5
+  regulatory_penalty:
+    probability: 0.4
+    amount_usd: 2500000
+  discount_rate_annual: 0.08
+
+strategies:
+  ai_assisted:
+    description: Automated detection shortens response once incident is known.
+    tier: glacier
+    destination: intra_aws
+    bandwidth_mbps: 1800
+    efficiency: 0.85
+
+  manual_only:
+    description: Human-driven response compounds detection delay.
+    tier: deep_archive
+    destination: internet
+    bandwidth_mbps: 400
+    efficiency: 0.6

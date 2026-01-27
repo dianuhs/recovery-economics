@@ -1,0 +1,41 @@
+name: "Region failure - customer-facing workloads"
+business_unit: "Customer Platform"
+
+parameters:
+  rto_minutes: 60                 # 1-hour target
+  rpo_minutes: 15
+  cost_per_minute_outage: 75000   # ~$4.5M/hour impact
+  detection_delay_minutes: 5
+  regulatory_penalty_probability: 0.4
+  regulatory_penalty_amount: 3000000
+  discount_rate_annual: 0.08
+  incident_frequency_per_year: 0.05    # 1 in 20 years
+  planning_horizon_years: 5
+
+strategies:
+  ai_assisted:
+    description: "AI-assisted regional failover with pre-validated runbooks, warm cross-region copies, and automated health checks before cutover."
+    restore:
+      tier: glacier
+      destination: intra_aws
+      size_gb: 5000          # 5 TB of active state + critical data
+      bandwidth_mbps: 3000
+      efficiency: 0.90
+
+  hybrid:
+    description: "Glacier with internet restore, AI suggestions for sequencing, manual execution and validation by platform teams."
+    restore:
+      tier: glacier
+      destination: internet
+      size_gb: 5000
+      bandwidth_mbps: 1500
+      efficiency: 0.80
+
+  manual_only:
+    description: "Deep Archive plus manual failover: scattered runbooks, cross-team coordination over chat and tickets, slower bandwidth and more handoffs."
+    restore:
+      tier: deep_archive
+      destination: internet
+      size_gb: 5000
+      bandwidth_mbps: 500
+      efficiency: 0.60

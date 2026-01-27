@@ -1,0 +1,41 @@
+name: "Compliance audit - long-tail archive pull"
+business_unit: "Risk & Compliance"
+
+parameters:
+  rto_minutes: 2880          # 48 hours
+  rpo_minutes: 1440          # 24 hours
+  cost_per_minute_outage: 2000
+  detection_delay_minutes: 0
+  regulatory_penalty_probability: 0.2
+  regulatory_penalty_amount: 10000000
+  discount_rate_annual: 0.08
+  incident_frequency_per_year: 0.2    # Roughly once every 5 years
+  planning_horizon_years: 5
+
+strategies:
+  ai_assisted:
+    description: "AI-assisted orchestration of large audit pulls: pre-validated queries, S3 inventory, and retrieval planning with human review on scope."
+    restore:
+      tier: glacier
+      destination: intra_aws
+      size_gb: 100000      # 100 TB regulatory archive
+      bandwidth_mbps: 3000
+      efficiency: 0.85
+
+  hybrid:
+    description: "Glacier with internet restore and mixed ownership: AI suggestions for datasets, human-controlled change tickets and approvals."
+    restore:
+      tier: glacier
+      destination: internet
+      size_gb: 100000
+      bandwidth_mbps: 1500
+      efficiency: 0.75
+
+  manual_only:
+    description: "Deep Archive with manually-planned restores driven by compliance and storage teams across tickets and spreadsheets."
+    restore:
+      tier: deep_archive
+      destination: internet
+      size_gb: 100000
+      bandwidth_mbps: 500
+      efficiency: 0.60
