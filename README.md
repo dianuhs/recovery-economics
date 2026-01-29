@@ -122,9 +122,7 @@ recovery-economics   --scenario-file scenarios/ransomware_fast_recovery.yml   --
 
 ### Screenshot: single-strategy analysis
 
-<!-- INSERT SCREENSHOT:
-artifacts/ransomware_fast_recovery_ai_assisted.png
--->
+![Ransomware fast recovery – AI-assisted strategy](artifacts/ransomware_fast_recovery_ai_assisted.png)
 
 ---
 
@@ -138,9 +136,7 @@ recovery-economics   --scenario-file scenarios/ransomware_fast_recovery.yml   --
 
 ### Screenshot: ransomware strategy comparison
 
-<!-- INSERT SCREENSHOT:
-artifacts/ransomware_fast_recovery_compare.png
--->
+![Ransomware fast recovery – strategy comparison](artifacts/ransomware_fast_recovery_compare.png)
 
 This view makes the tradeoffs explicit:
 small monthly storage savings can concentrate millions of dollars of risk during recovery.
@@ -166,9 +162,7 @@ This scenario models:
 
 ### Screenshot: region failure comparison
 
-<!-- INSERT SCREENSHOT:
-artifacts/region_failure_customer_facing_compare.png
--->
+![Region failure – customer-facing strategy comparison](artifacts/region_failure_customer_facing_compare.png)
 
 ---
 
