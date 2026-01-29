@@ -1,8 +1,8 @@
 # Recovery Economics
 
-Recovery Economics is a decision tool for stress‑testing cloud backup and recovery choices.
+Recovery Economics is a decision tool for stress testing cloud backup and recovery choices.
 
-It focuses on a part of cloud cost optimization that is usually hand‑waved or oversimplified:
+It focuses on a part of cloud cost optimization that is often hand-waved or oversimplified:
 **what actually happens when you need your data back**.
 
 Instead of stopping at “this storage tier is cheaper,” Recovery Economics helps answer questions like:
@@ -11,7 +11,7 @@ Instead of stopping at “this storage tier is cheaper,” Recovery Economics he
 - Does that fit within the RTO we’ve committed to?
 - How much value is at risk if we miss it?
 - How do detection delays change the economics?
-- Over a planning horizon, are storage savings worth the recovery risk?
+- Over a planning horizon, are storage savings actually worth the recovery risk?
 
 The output is deterministic, auditable, and intentionally opinionated.
 All assumptions are explicit and visible.
@@ -34,186 +34,141 @@ During a real incident:
 - downtime cost dominates storage savings
 - regulatory and reputational risk show up in the same hour as the outage
 
-Recovery Economics frames cold storage as a **risk decision** that connects
-storage choices to downtime, regulatory impact, and strategy design.
+Recovery Economics frames cold storage as a **risk decision**, connecting storage choices
+directly to downtime, regulatory impact, and recovery strategy design.
 
 ---
 
 ## What it does
 
 Recovery Economics models the economics of restoring data from AWS cold storage tiers
-for two main workflows:
+across two complementary workflows:
 
-1. **Direct restore stress test**:  
-   Answer “what happens if we pull _this_ many GB from _this_ tier under _these_ conditions?”
-2. **Scenario‑driven strategy comparison**:  
-   Model a full business scenario in YAML and compare AI‑assisted runbooks vs hybrid vs fully manual recovery.
+1. **Direct restore stress testing**
+2. **Scenario-driven recovery strategy comparison**
 
 ### 1. Direct restore stress test
 
-Given a storage tier, size, and network assumptions, Recovery Economics estimates:
+Given a storage tier, data size, and network assumptions, Recovery Economics estimates:
 
 - thaw time
 - transfer time
 - total restore time
-- restore‑only RTO hit/miss
+- restore-only RTO hit or miss
 - retrieval and egress costs
 
 Example:
 
 ```bash
-recovery-economics \
-  --tier glacier \
-  --size-gb 2000 \
-  --destination intra_aws \
-  --bandwidth-mbps 2000 \
-  --efficiency 0.85 \
-  --rto-hours 4
+recovery-economics   --tier glacier   --size-gb 2000   --destination intra_aws   --bandwidth-mbps 2000   --efficiency 0.85   --rto-hours 4
 ```
 
-This prints a short, human‑readable breakdown of restore time and cost.
-To integrate with other tools, add `--json`:
+To integrate with other tools, add `--json` for machine-readable output.
 
-```bash
-recovery-economics \
-  --tier glacier \
-  --size-gb 2000 \
-  --destination intra_aws \
-  --bandwidth-mbps 2000 \
-  --efficiency 0.85 \
-  --rto-hours 4 \
-  --json
-```
+---
 
-Example JSON (truncated):
+### 2. Scenario-driven strategy comparison
 
-```json
-{
-  "inputs": {
-    "tier": "glacier",
-    "size_gb": 2000.0,
-    "destination": "intra_aws",
-    "bandwidth_mbps": 2000.0,
-    "efficiency": 0.85,
-    "rto_hours": 4.0
-  },
-  "result": {
-    "thaw_time_hours": 4.0,
-    "transfer_time_hours": 2.61,
-    "total_time_hours": 6.61,
-    "retrieval_cost_usd": 20.0,
-    "egress_cost_usd": 0.0,
-    "total_cost_usd": 20.0
-  }
-}
-```
+The more powerful mode is **scenario files**.
 
-### 2. Scenario‑driven strategy comparison
+A scenario captures:
 
-The more interesting mode is **scenario files**.
-
-A scenario describes:
-
-- the business context
+- business context
 - RTO / RPO commitments
 - downtime economics
+- detection delays
 - regulatory penalty exposure
-- one or more strategies (AI‑assisted, hybrid, manual)
+- one or more recovery strategies
 
-Each strategy points at a specific restore profile (tier, destination, size, bandwidth, efficiency).
-The CLI then computes:
+Each strategy defines a restore profile (tier, destination, size, bandwidth, efficiency).
+The CLI computes:
 
-- end‑to‑end downtime (including detection delay)
-- RTO miss in hours
-- per‑event downtime loss
-- expected regulatory penalty per event
+- end-to-end downtime
+- RTO miss (hours)
+- downtime loss per event
+- expected regulatory penalty
+- total modeled risk per event
 - expected loss over a planning horizon
-- side‑by‑side strategy comparison
+- side-by-side strategy comparisons
 
 ---
 
 ## Example: ransomware – fast recovery
 
-This repository includes a worked example at:
+This repository includes a worked scenario:
 
 ```text
 scenarios/ransomware_fast_recovery.yml
 ```
 
-Conceptually, it models:
+It models:
 
 - a critical payments workload
-- 60‑minute RTO and 15‑minute RPO
-- high downtime cost per minute
-- a non‑zero chance of regulatory penalty
+- tight RTO and RPO commitments
+- high downtime cost
+- non-zero regulatory exposure
 
 with three strategies:
 
-- `ai_assisted`: AI‑assisted runbook, pre‑validated automation, human approval on high‑risk steps.
-- `hybrid`: AI suggestions, manual execution for most steps.
-- `manual_only`: traditional, ticket‑driven coordination across teams.
+- **ai_assisted**: AI-assisted runbook with pre-validated automation and human approval on high-risk steps.
+- **hybrid**: AI suggestions with manual execution.
+- **manual_only**: fully manual, ticket-driven coordination.
 
 Run a single strategy:
 
 ```bash
-recovery-economics \
-  --scenario-file scenarios/ransomware_fast_recovery.yml \
-  --strategy ai_assisted
+recovery-economics   --scenario-file scenarios/ransomware_fast_recovery.yml   --strategy ai_assisted
 ```
 
-Example output (abbreviated):
+### Screenshot: single-strategy analysis
 
-```text
-Recovery Economics — Scenario Mode
-----------------------------------
-Loaded scenario: Ransomware – fast recovery
-Business unit: Core Payments
+<!-- INSERT SCREENSHOT:
+artifacts/ransomware_fast_recovery_ai_assisted.png
+-->
 
-Strategy: ai_assisted
-Tier: glacier → intra_aws
-Total restore time: 6.61h
-End-to-end downtime: 6.94h
-RTO: 1.00h
-RTO miss: 5.94h
-Estimated downtime loss (per event): $7,132,000.00
-Expected regulatory penalty (per event): $600,000.00
-Total modeled risk (per event): $7,732,000.00
-Expected total risk over 5.0 years at 0.20 incidents/year: $7,732,000.00
-```
+---
 
-Compare all strategies:
+### Strategy comparison
+
+Compare all strategies side by side:
 
 ```bash
-recovery-economics \
-  --scenario-file scenarios/ransomware_fast_recovery.yml \
-  --compare-strategies
+recovery-economics   --scenario-file scenarios/ransomware_fast_recovery.yml   --compare-strategies
 ```
 
-Example comparison table:
+### Screenshot: ransomware strategy comparison
+
+<!-- INSERT SCREENSHOT:
+artifacts/ransomware_fast_recovery_compare.png
+-->
+
+This view makes the tradeoffs explicit:
+small monthly storage savings can concentrate millions of dollars of risk during recovery.
+
+---
+
+## Additional scenario: region failure (customer-facing)
+
+Recovery Economics supports multiple scenario classes.
+
+Example:
 
 ```text
-Recovery Economics — Scenario Strategy Comparison
--------------------------------------------------
-Scenario: Ransomware – fast recovery
-Business unit: Core Payments
-
-Strategy       Tier→Dest                 E2E (h) RTO miss (h)    Downtime/evt    Total risk/evt   Exp risk horizon
-------------------------------------------------------------------------------------------------------------------
-ai_assisted    glacier→intra_aws            6.94         5.94 $     7,132,000 $       7,732,000         $7,732,000
-manual_only    deep_archive→internet       27.14        26.14 $    31,372,000 $      31,972,000        $31,972,000
-hybrid         glacier→internet            10.68         9.68 $    11,620,000 $      12,220,000        $12,220,000
+scenarios/region_failure_customer_facing.yml
 ```
 
-If you prefer JSON, add `--json`:
+This scenario models:
 
-```bash
-recovery-economics \
-  --scenario-file scenarios/ransomware_fast_recovery.yml \
-  --compare-strategies \
-  --json
-```
+- customer-facing regional outage
+- large data volumes
+- meaningful regulatory exposure
+- aggressive RTO targets
 
-You’ll get one JSON document per strategy, suitable for piping into a dashboard or notebook.
+### Screenshot: region failure comparison
+
+<!-- INSERT SCREENSHOT:
+artifacts/region_failure_customer_facing_compare.png
+-->
 
 ---
 
@@ -223,11 +178,11 @@ Scenario files are plain YAML.
 
 At a high level:
 
-- `id`, `name`, `business_unit` describe the scenario.
-- `parameters` define RTO/RPO, downtime cost, detection delay, regulatory risk, and horizon.
-- `strategies` define the restore profile for each strategy.
+- `id`, `name`, `business_unit` describe the scenario
+- `parameters` define RTO/RPO, downtime cost, detection delay, regulatory risk, and horizon
+- `strategies` define restore profiles per strategy
 
-Example (simplified):
+Simplified example:
 
 ```yaml
 id: ransomware_fast_recovery
@@ -241,131 +196,75 @@ parameters:
   detection_delay_minutes: 20
   regulatory_penalty_probability: 0.3
   regulatory_penalty_amount: 2000000
-  discount_rate_annual: 0.08
   incident_frequency_per_year: 0.2
   planning_horizon_years: 5
 
 strategies:
   ai_assisted:
-    description: "AI-assisted runbook with pre-validated automation and human approval on high-risk steps."
+    description: "AI-assisted runbook with pre-validated automation."
     restore:
       tier: glacier
       destination: intra_aws
       size_gb: 2000
       bandwidth_mbps: 2000
       efficiency: 0.85
-
-  manual_only:
-    description: "Traditional manual runbook with human coordination across teams."
-    restore:
-      tier: deep_archive
-      destination: internet
-      size_gb: 2000
-      bandwidth_mbps: 500
-      efficiency: 0.60
 ```
-
-The CLI converts this into hours, dollars, and risk metrics.
 
 ---
 
 ## Included scenarios
 
-This repo ships with a small scenario library to showcase different failure modes:
+This repo ships with a small scenario library covering common failure modes:
 
-- `ransomware_fast_recovery.yml`  
-  Critical payments workload with tight RTO, contrasting AI‑assisted vs manual recovery.
+- `ransomware_fast_recovery.yml`
+- `ransomware_delayed_detection.yml`
+- `accidental_delete_production.yml`
+- `region_outage_analytics.yml`
+- `compliance_audit_restore.yml`
+- `test_restore_quarterly.yml`
+- `region_failure_customer_facing.yml`
 
-- `ransomware_delayed_detection.yml`  
-  Similar to the fast‑recovery case, but with slower detection and heavier emphasis on detection lag.
-
-- `accidental_delete_production.yml`  
-  Production data loss with no regulatory penalty but real downtime cost and RPO sensitivity.
-
-- `region_outage_analytics.yml`  
-  Region‑level event for analytics workloads with lower cost per minute but large data volumes.
-
-- `compliance_audit_restore.yml`  
-  Large regulatory archive restores where the main risk is audit delay and penalties, not customer‑visible downtime.
-
-- `test_restore_quarterly.yml`  
-  Regular disaster recovery testing program, modeling the cost of consistently exercising restores.
-
-- `region_failure_customer_facing.yml`  
-  Customer‑facing regional failure with large volumes, meaningful regulatory risk, and sharp RTO targets.
-
-Each scenario is a starting point. Copy, rename, and adjust the YAML to reflect your own workloads, tiers, and economics.
+Each scenario is meant to be copied and adapted to your own workloads.
 
 ---
 
 ## AI decision narrative (optional)
 
-For a single strategy run, you can ask Recovery Economics to print a short narrative summary:
+For a single strategy run:
 
 ```bash
-recovery-economics \
-  --scenario-file scenarios/ransomware_fast_recovery.yml \
-  --strategy ai_assisted \
-  --ai-narrative
+recovery-economics   --scenario-file scenarios/ransomware_fast_recovery.yml   --strategy ai_assisted   --ai-narrative
 ```
 
-If an OpenAI API key is available in `OPENAI_API_KEY`, the tool will:
-
-- describe the strategy in plain language
-- call out RTO miss vs target
-- summarize downtime and penalty risk
-
-If the API key or client is missing, the rest of the CLI continues to work without AI output.
-
----
-
-## Screenshots
-
-If you prefer to show the tool in action in your own docs or slideware:
-
-1. Run one or more of the examples above in your terminal.
-2. On macOS, use `⌘ + Shift + 4` to capture a selection of the terminal window.
-3. Save the PNGs into the repo, for example:
-
-   ```text
-   artifacts/ransomware_fast_recovery_compare.png
-   artifacts/region_failure_customer_facing_compare.png
-   ```
-
-4. Reference them in Markdown:
-
-   ```markdown
-   ![Ransomware fast recovery comparison](artifacts/ransomware_fast_recovery_compare.png)
-
-   ![Region failure customer-facing comparison](artifacts/region_failure_customer_facing_compare.png)
-   ```
-
-These screenshots pair nicely with the scenario YAML and the comparison tables above.
+The AI narrative explains already-computed results:
+RTO miss, downtime exposure, and expected loss.
+If no API key is present, the CLI still works without AI output.
 
 ---
 
 ## Who this is for
 
-- FinOps practitioners who want recovery to show up in cost conversations
+- FinOps practitioners who want recovery risk reflected in cost decisions
 - Cloud cost and infrastructure engineers
-- SRE and reliability teams running DR tests and chaos experiments
+- SRE and reliability teams running DR tests
 - Anyone translating between finance, engineering, and operational risk
 
-Recovery Economics is intentionally focused.
-It favors clear, repeatable decision framing over dashboards
-and keeps the model small enough that you can read and reason about it.
+Recovery Economics favors clarity over coverage and judgment over dashboards.
 
-It pairs naturally with tools like **FinOps Lite** and **FinOps Watchdog** as the **recovery decision layer**.
+It pairs naturally with **FinOps Lite** and **FinOps Watchdog** as the
+**recovery decision layer** in a broader FinOps workflow.
 
 ---
 
-## Next update will include
+## Next updates may include
 
-Planned directions for the next version:
+Planned directions:
 
-- A **scenario builder** that makes it easier to define and validate new YAML scenarios from a standard template.
-- Optional **dependency‑graph support** for multi‑step runbooks and critical‑path recovery (multiple restores, cutovers, and validation steps).
-- Experimental **probabilistic inputs** (ranges and percentiles) layered on top of the deterministic core, for teams that want to explore tail risk.
-- Better hooks for **integration with FinOps Lite and FinOps Watchdog**, so recovery risk can be surfaced alongside spend changes and guardrail alerts.
+- A richer scenario authoring experience
+- Optional dependency graphs for multi-step recovery paths
+- Experimental probabilistic inputs layered on top of deterministic modeling
+- Tighter integration with FinOps Lite and FinOps Watchdog
 
-The current version focuses on getting the core economics right, in a form that can be read, audited, and extended by your own team.
+The current version focuses on getting the core economics right in a form that is
+readable, auditable, and easy to extend.
+
