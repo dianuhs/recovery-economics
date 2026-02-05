@@ -1,26 +1,55 @@
-import pytest
-import math
-
-from recovery_economics.model import RestoreInputs, estimate_restore
-from recovery_economics.aws_pricing import get_default_pricing
+from recovery_economics.model import WorkloadConfig, calculate_workload_cost, summarize_costs
 
 
-def test_estimate_restore_glacier_intra_aws_basic():
-    pricing = get_default_pricing("glacier")
-    inputs = RestoreInputs(
-        data_size_gb=1000.0,
-        bandwidth_mbps=1000.0,
-        link_efficiency=0.8,
-        restore_destination="intra_aws",
-        rto_hours=8.0,
+def test_calculate_workload_cost_math() -> None:
+    config = WorkloadConfig(
+        workload="orders-api",
+        data_gb=500.0,
+        backup_frequency_per_month=30.0,
+        retention_months=3.0,
+        storage_rate_per_gb_month=0.02,
+        restore_gb_per_month=50.0,
+        restore_rate_per_gb=0.05,
     )
-    result = estimate_restore(inputs, pricing)
 
-    # Basic sanity checks: no negative times, totals make sense, cost is finite
-    assert result.thaw_time_hours > 0
-    assert result.transfer_time_hours > 0
-    assert math.isfinite(result.total_time_hours)
-    assert result.total_time_hours == pytest.approx(
-        result.thaw_time_hours + result.transfer_time_hours, rel=1e-6
-    )
-    assert result.total_cost_usd >= 0
+    workload = calculate_workload_cost(config)
+
+    assert workload.monthly_storage_cost == 900.0
+    assert workload.monthly_restore_cost == 2.5
+    assert workload.total_monthly_resilience_cost == 902.5
+
+
+def test_summarize_costs() -> None:
+    workloads = [
+        calculate_workload_cost(
+            WorkloadConfig(
+                workload="a",
+                data_gb=100.0,
+                backup_frequency_per_month=4.0,
+                retention_months=3.0,
+                storage_rate_per_gb_month=0.02,
+                restore_gb_per_month=10.0,
+                restore_rate_per_gb=0.05,
+            )
+        ),
+        calculate_workload_cost(
+            WorkloadConfig(
+                workload="b",
+                data_gb=250.0,
+                backup_frequency_per_month=30.0,
+                retention_months=1.0,
+                storage_rate_per_gb_month=0.01,
+                restore_gb_per_month=50.0,
+                restore_rate_per_gb=0.02,
+            )
+        ),
+    ]
+
+    summary = summarize_costs(workloads)
+
+    assert summary == {
+        "total_workloads": 2,
+        "total_monthly_storage_cost": 99.0,
+        "total_monthly_restore_cost": 1.5,
+        "total_monthly_resilience_cost": 100.5,
+    }

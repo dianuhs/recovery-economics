@@ -5,25 +5,26 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "recovery-economics"
 version = "0.1.0"
-description = "Scenario-driven modeling of cloud backup and recovery risk for AWS cold storage."
+description = "CSV-driven CLI for monthly backup/restore resilience cost modeling."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
   { name = "Diana" }
 ]
-keywords = ["finops", "cloud", "aws", "backup", "recovery", "risk", "rto"]
+keywords = ["finops", "cloud", "backup", "restore", "resilience", "cli"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Operating System :: OS Independent",
 ]
 
-dependencies = []
+dependencies = [
+  "PyYAML>=6.0",
+]
 
 [project.scripts]
 recovery-economics = "recovery_economics.cli:main"
 
 [tool.setuptools]
 packages = ["recovery_economics"]
-

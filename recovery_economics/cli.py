@@ -1,407 +1,288 @@
-
 from __future__ import annotations
 
 import argparse
+import csv
 import json
-import pathlib
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple, List
+import sys
+from pathlib import Path
+from typing import List, Sequence, TextIO
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
+    yaml = None
 
-from .aws_pricing import get_default_pricing
-from .model import RestoreInputs, estimate_restore
+from .model import (
+    DEFAULT_WORKLOAD_COLUMN,
+    REQUIRED_NUMERIC_COLUMNS,
+    WorkloadConfig,
+    WorkloadCost,
+    build_report_payload,
+    calculate_workload_cost,
+)
 
-HISTORY_FILE = pathlib.Path("history.jsonl")
-
-
-# ---------- Helpers ----------
-
-def load_scenario(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def compute_downtime(
-    total_time_hours: float,
-    detection_lag_hours: float,
-    rto_hours: Optional[float],
-    cost_per_hour: Optional[float],
-) -> Tuple[float, float, float]:
-    """Return (rto_miss_hours, downtime_loss_usd, end_to_end_downtime_hours)."""
-    end_to_end = total_time_hours + max(0.0, detection_lag_hours or 0.0)
-    if rto_hours is None or cost_per_hour is None:
-        return 0.0, 0.0, end_to_end
-    miss = max(0.0, end_to_end - rto_hours)
-    return miss, miss * cost_per_hour, end_to_end
+EXIT_SUCCESS = 0
+EXIT_USAGE_ERROR = 2
+EXIT_INPUT_FILE_ERROR = 3
+EXIT_SCHEMA_DATA_ERROR = 4
+EXIT_INTERNAL_RUNTIME_ERROR = 5
 
 
-def log_decision(record: Dict[str, Any]) -> None:
-    try:
-        with HISTORY_FILE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-    except Exception:
-        # Logging should never break the CLI
-        pass
+class InputFileError(Exception):
+    pass
+
+
+class SchemaDataError(Exception):
+    pass
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="recovery-economics")
+    parser = argparse.ArgumentParser(
+        prog="recovery-economics",
+        description=(
+            "Recovery Economics v0.1: calculate monthly resilience cost from local CSV input."
+        ),
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Normal one-off mode
-    p.add_argument("--tier", choices=["glacier", "deep_archive"])
-    p.add_argument("--size-gb", type=float)
-    p.add_argument("--destination", choices=["internet", "intra_aws"])
-    p.add_argument("--bandwidth-mbps", type=float)
-    p.add_argument("--efficiency", type=float)
-    p.add_argument("--rto-hours", type=float)
-    p.add_argument("--downtime-cost-per-hour", type=float)
-    p.add_argument("--detection-lag-hours", type=float)
-
-    # Scenario mode
-    p.add_argument("--scenario-file", type=str, help="Path to scenario YAML.")
-    p.add_argument("--strategy", type=str, help="Strategy id inside scenario file.")
-    p.add_argument(
-        "--compare-strategies",
-        action="store_true",
-        help="Compare all strategies defined in the scenario file.",
+    analyze = subparsers.add_parser(
+        "analyze",
+        help="Analyze backup/restore strategy costs from a CSV file.",
+    )
+    analyze.add_argument(
+        "--input",
+        required=True,
+        help="Path to the workload CSV file.",
+    )
+    analyze.add_argument(
+        "--output-format",
+        required=True,
+        choices=("json", "yaml", "csv"),
+        help="Output format.",
+    )
+    analyze.add_argument(
+        "--workload-column",
+        default=DEFAULT_WORKLOAD_COLUMN,
+        help="Column name for workload identifiers.",
     )
 
-    # Output / extra helpers
-    p.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable JSON instead of human text.",
-    )
-    p.add_argument(
-        "--ai-narrative",
-        action="store_true",
-        help="Print a short human-readable summary for a single strategy.",
-    )
-
-    return p
+    return parser
 
 
-# ---------- Strategy evaluation helpers ----------
-
-def _extract_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
-    rto_hours = (params.get("rto_minutes") or 0) / 60.0
-    detection_lag_hours = (params.get("detection_delay_minutes") or 0) / 60.0
-    cost_per_hour = (params.get("cost_per_minute_outage") or 0) * 60.0
-
-    incident_freq = params.get("incident_frequency_per_year")
-    horizon_years = params.get("planning_horizon_years")
-    reg_prob = params.get("regulatory_penalty_probability", 0.0)
-    reg_amount = params.get("regulatory_penalty_amount", 0.0)
-    discount_rate = params.get("discount_rate_annual", 0.0)
-
-    return {
-        "rto_hours": float(rto_hours),
-        "detection_lag_hours": float(detection_lag_hours),
-        "cost_per_hour": float(cost_per_hour),
-        "incident_frequency_per_year": incident_freq,
-        "planning_horizon_years": horizon_years,
-        "regulatory_penalty_probability": float(reg_prob),
-        "regulatory_penalty_amount": float(reg_amount),
-        "discount_rate_annual": float(discount_rate),
-    }
-
-
-def evaluate_strategy(
-    scenario: Dict[str, Any],
-    strategy_id: str,
-) -> Dict[str, Any]:
-    params = scenario.get("parameters", {})
-    strategies = scenario.get("strategies", {})
-    if strategy_id not in strategies:
-        raise SystemExit(f"Unknown strategy '{strategy_id}'")
-
-    strat = strategies[strategy_id]
-    restore = strat["restore"]
-
-    tier = restore["tier"]
-    size_gb = float(restore["size_gb"])
-    destination = restore["destination"]
-    bandwidth = float(restore["bandwidth_mbps"])
-    efficiency = float(restore.get("efficiency", 0.7))
-
-    derived = _extract_parameters(params)
-    rto_hours = derived["rto_hours"]
-    detection_lag_hours = derived["detection_lag_hours"]
-    cost_per_hour = derived["cost_per_hour"]
-    incident_freq = derived["incident_frequency_per_year"]
-    horizon_years = derived["planning_horizon_years"]
-    reg_prob = derived["regulatory_penalty_probability"]
-    reg_amount = derived["regulatory_penalty_amount"]
-
-    pricing = get_default_pricing(tier)
-    inputs = RestoreInputs(
-        data_size_gb=size_gb,
-        bandwidth_mbps=bandwidth,
-        link_efficiency=efficiency,
-        restore_destination=destination,
-        rto_hours=rto_hours,
-    )
-    result = estimate_restore(inputs, pricing)
-
-    rto_miss, downtime_loss, end_to_end = compute_downtime(
-        result.total_time_hours,
-        detection_lag_hours,
-        rto_hours,
-        cost_per_hour,
-    )
-
-    # Regulatory penalty expected value per event
-    expected_penalty_per_event = reg_prob * reg_amount if reg_prob and reg_amount else 0.0
-
-    per_event_total_risk = downtime_loss + expected_penalty_per_event
-
-    expected_over_horizon = None
-    if incident_freq is not None and horizon_years is not None:
-        expected_over_horizon = per_event_total_risk * incident_freq * horizon_years
-
-    record: Dict[str, Any] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "scenario": scenario.get("name"),
-        "business_unit": scenario.get("business_unit"),
-        "strategy": strategy_id,
-        "tier": tier,
-        "destination": destination,
-        "size_gb": size_gb,
-        "bandwidth_mbps": bandwidth,
-        "efficiency": efficiency,
-        "rto_hours": rto_hours,
-        "detection_lag_hours": detection_lag_hours,
-        "cost_per_hour": cost_per_hour,
-        "total_time_hours": result.total_time_hours,
-        "end_to_end_downtime_hours": end_to_end,
-        "rto_miss_hours": rto_miss,
-        "downtime_loss_per_event_usd": downtime_loss,
-        "regulatory_penalty_expected_per_event_usd": expected_penalty_per_event,
-        "total_risk_per_event_usd": per_event_total_risk,
-        "incident_frequency_per_year": incident_freq,
-        "planning_horizon_years": horizon_years,
-        "expected_total_risk_over_horizon_usd": expected_over_horizon,
-    }
-
-    return record
-
-
-def print_single_strategy(record: Dict[str, Any]) -> None:
-    print("Recovery Economics — Scenario Mode")
-    print("----------------------------------")
-    print(f"Loaded scenario: {record.get('scenario')}")
-    print(f"Business unit: {record.get('business_unit')}")
-
-    print(f"\nStrategy: {record.get('strategy')}")
-    print(f"Tier: {record.get('tier')} → {record.get('destination')}")
-    print(f"Total restore time: {record['total_time_hours']:.2f}h")
-    print(f"End-to-end downtime: {record['end_to_end_downtime_hours']:.2f}h")
-    print(f"RTO: {record['rto_hours']:.2f}h")
-    print(f"RTO miss: {record['rto_miss_hours']:.2f}h")
-
-    print(
-        f"Estimated downtime loss (per event): "
-        f"${record['downtime_loss_per_event_usd']:,.2f}"
-    )
-
-    if record["regulatory_penalty_expected_per_event_usd"]:
-        print(
-            f"Expected regulatory penalty (per event): "
-            f"${record['regulatory_penalty_expected_per_event_usd']:,.2f}"
+def _parse_non_negative_float(raw_value: str | None, column_name: str, row_number: int) -> float:
+    value_text = "" if raw_value is None else str(raw_value).strip()
+    if value_text == "":
+        raise SchemaDataError(
+            f"Row {row_number}: column '{column_name}' is empty; expected a numeric value."
         )
 
-    if record["total_risk_per_event_usd"] != record["downtime_loss_per_event_usd"]:
-        print(
-            f"Total modeled risk (per event): "
-            f"${record['total_risk_per_event_usd']:,.2f}"
+    try:
+        value = float(value_text)
+    except ValueError as exc:
+        raise SchemaDataError(
+            f"Row {row_number}: column '{column_name}' has non-numeric value '{value_text}'."
+        ) from exc
+
+    if value < 0:
+        raise SchemaDataError(
+            f"Row {row_number}: column '{column_name}' must be >= 0, got {value_text}."
         )
 
-    if (
-        record.get("incident_frequency_per_year") is not None
-        and record.get("planning_horizon_years") is not None
-        and record.get("expected_total_risk_over_horizon_usd") is not None
-    ):
-        print(
-            f"Expected total risk over {record['planning_horizon_years']:.1f} years "
-            f"at {record['incident_frequency_per_year']:.2f} incidents/year: "
-            f"${record['expected_total_risk_over_horizon_usd']:,.2f}"
-        )
+    return value
 
 
-def print_compare(records: List[Dict[str, Any]]) -> None:
-    print("Recovery Economics — Scenario Strategy Comparison")
-    print("-------------------------------------------------")
-    if not records:
-        print("No strategies to compare.")
-        return
-
-    scenario_name = records[0].get("scenario")
-    bu = records[0].get("business_unit")
-    print(f"Scenario: {scenario_name}")
-    print(f"Business unit: {bu}\n")
-
-    header = (
-        f"{'Strategy':<14} {'Tier→Dest':<24} "
-        f"{'E2E (h)':>8} {'RTO miss (h)':>12} "
-        f"{'Downtime/evt':>15} {'Total risk/evt':>17} {'Exp risk horizon':>18}"
-    )
-    print(header)
-    print("-" * len(header))
-
-    for rec in records:
-        tier_dest = f"{rec['tier']}→{rec['destination']}"
-        downtime = rec['downtime_loss_per_event_usd']
-        total_risk = rec['total_risk_per_event_usd']
-        exp_horizon = rec.get('expected_total_risk_over_horizon_usd')
-
-        exp_str = f"${exp_horizon:,.0f}" if exp_horizon is not None else "n/a"
-
-        print(
-            f"{rec['strategy']:<14} {tier_dest:<24} "
-            f"{rec['end_to_end_downtime_hours']:>8.2f} {rec['rto_miss_hours']:>12.2f} "
-            f"${downtime:>14,.0f} ${total_risk:>16,.0f} {exp_str:>18}"
-        )
+def _is_blank_row(row: dict[str, str | None]) -> bool:
+    return all(value is None or str(value).strip() == "" for value in row.values())
 
 
-def generate_narrative(record: Dict[str, Any]) -> str:
-    """Generate a short, human-readable summary for a single strategy.
+def load_workloads(input_file: str, workload_column: str) -> List[WorkloadConfig]:
+    path = Path(input_file)
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames is None:
+                raise SchemaDataError("Input CSV is empty or missing a header row.")
 
-    No external API calls, just templated text in a FinOps / SRE-friendly tone.
-    """
-    scenario = record.get("scenario") or "this scenario"
-    bu = record.get("business_unit") or "this business unit"
-    strategy = record.get("strategy") or "this strategy"
-    tier = record.get("tier")
-    dest = record.get("destination")
-    e2e = record.get("end_to_end_downtime_hours") or 0.0
-    rto = record.get("rto_hours") or 0.0
-    miss = record.get("rto_miss_hours") or 0.0
-    per_event = record.get("total_risk_per_event_usd") or 0.0
-    horizon = record.get("expected_total_risk_over_horizon_usd")
-    incidents = record.get("incident_frequency_per_year")
-    years = record.get("planning_horizon_years")
+            required_columns = [workload_column, *REQUIRED_NUMERIC_COLUMNS]
+            missing_columns = [
+                column for column in required_columns if column not in reader.fieldnames
+            ]
+            if missing_columns:
+                missing_text = ", ".join(sorted(missing_columns))
+                raise SchemaDataError(f"Missing required columns: {missing_text}")
 
-    lines = []
+            workloads: List[WorkloadConfig] = []
+            for row_number, row in enumerate(reader, start=2):
+                if _is_blank_row(row):
+                    continue
 
-    lines.append(
-        f"For '{scenario}' in {bu}, the '{strategy}' path on {tier} → {dest} "
-        f"drives about {e2e:.1f} hours of end-to-end downtime against a "
-        f"{rto:.1f}-hour RTO target."
-    )
+                workload_name = (row.get(workload_column) or "").strip()
+                if not workload_name:
+                    raise SchemaDataError(
+                        f"Row {row_number}: column '{workload_column}' is empty."
+                    )
 
-    if miss > 0.0:
-        lines.append(
-            f"That leaves roughly {miss:.1f} hours of RTO miss in the tail "
-            f"of a serious incident."
-        )
-    else:
-        lines.append(
-            "On these assumptions, the modeled downtime stays within the stated RTO target."
-        )
+                workload = WorkloadConfig(
+                    workload=workload_name,
+                    data_gb=_parse_non_negative_float(row.get("data_gb"), "data_gb", row_number),
+                    backup_frequency_per_month=_parse_non_negative_float(
+                        row.get("backup_frequency_per_month"),
+                        "backup_frequency_per_month",
+                        row_number,
+                    ),
+                    retention_months=_parse_non_negative_float(
+                        row.get("retention_months"),
+                        "retention_months",
+                        row_number,
+                    ),
+                    storage_rate_per_gb_month=_parse_non_negative_float(
+                        row.get("storage_rate_per_gb_month"),
+                        "storage_rate_per_gb_month",
+                        row_number,
+                    ),
+                    restore_gb_per_month=_parse_non_negative_float(
+                        row.get("restore_gb_per_month"),
+                        "restore_gb_per_month",
+                        row_number,
+                    ),
+                    restore_rate_per_gb=_parse_non_negative_float(
+                        row.get("restore_rate_per_gb"),
+                        "restore_rate_per_gb",
+                        row_number,
+                    ),
+                )
+                workloads.append(workload)
 
-    lines.append(
-        f"Putting a price on it, the modeled risk is around ${per_event:,.0f} "
-        f"per ransomware event when you combine downtime and expected penalties."
-    )
-
-    if horizon is not None and incidents is not None and years is not None:
-        lines.append(
-            f"Over a {years:.0f}-year planning window at about {incidents:.2f} events per year, "
-            f"that translates into roughly ${horizon:,.0f} of expected loss for this strategy."
-        )
-
-    return " ".join(lines)
+            return workloads
+    except FileNotFoundError as exc:
+        raise InputFileError(f"File not found: {input_file}") from exc
+    except PermissionError as exc:
+        raise InputFileError(f"File is not readable: {input_file}") from exc
+    except OSError as exc:
+        raise InputFileError(f"Could not read input file '{input_file}': {exc}") from exc
 
 
-# ---------- Main ----------
+def _emit_json(payload: dict, stdout: TextIO) -> None:
+    json.dump(payload, stdout, indent=2)
+    stdout.write("\n")
 
-def main() -> None:
-    args = build_parser().parse_args()
 
-    # Scenario-driven mode
-    if args.scenario_file:
-        scenario = load_scenario(args.scenario_file)
-        strategies = scenario.get("strategies", {})
+def _yaml_scalar(value: object) -> str:
+    if isinstance(value, str):
+        # JSON string quoting is valid YAML and keeps output deterministic.
+        return json.dumps(value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    return str(value)
 
-        # Compare all strategies
-        if args.compare_strategies:
-            records = [evaluate_strategy(scenario, sid) for sid in strategies.keys()]
-            if args.json:
-                print(json.dumps(records, indent=2))
+
+def _yaml_lines(value: object, indent: int = 0) -> list[str]:
+    pad = " " * indent
+    if isinstance(value, dict):
+        if not value:
+            return [f"{pad}{{}}"]
+        lines: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                lines.append(f"{pad}{key}:")
+                lines.extend(_yaml_lines(item, indent + 2))
             else:
-                print_compare(records)
-            for rec in records:
-                log_decision(rec)
-            return
+                lines.append(f"{pad}{key}: {_yaml_scalar(item)}")
+        return lines
+    if isinstance(value, list):
+        if not value:
+            return [f"{pad}[]"]
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                lines.append(f"{pad}-")
+                lines.extend(_yaml_lines(item, indent + 2))
+            else:
+                lines.append(f"{pad}- {_yaml_scalar(item)}")
+        return lines
+    return [f"{pad}{_yaml_scalar(value)}"]
 
-        # List strategies only
-        if not args.strategy:
-            print("Recovery Economics — Scenario Mode")
-            print("----------------------------------")
-            print(f"Loaded scenario: {scenario.get('name')}")
-            print(f"Business unit: {scenario.get('business_unit')}")
-            print("\nStrategies:")
-            for k, v in strategies.items():
-                print(f"- {k}: {v.get('description')}")
-            print("\n[Scenario-only mode] No restore calculations run yet.")
-            return
 
-        # Single strategy evaluation
-        record = evaluate_strategy(scenario, args.strategy)
-        if args.json:
-            print(json.dumps(record, indent=2))
-            log_decision(record)
-            return
+def _emit_yaml(payload: dict, stdout: TextIO) -> None:
+    if yaml is not None:
+        yaml_text = yaml.safe_dump(payload, sort_keys=False)
+    else:
+        yaml_text = "\n".join(_yaml_lines(payload))
+    stdout.write(yaml_text)
+    if not yaml_text.endswith("\n"):
+        stdout.write("\n")
 
-        print_single_strategy(record)
-        if args.ai_narrative:
-            print("\nAI-style Narrative")
-            print("-------------------")
-            print(generate_narrative(record))
 
-        log_decision(record)
-        return
+def _emit_csv(workloads: List[WorkloadCost], stdout: TextIO) -> None:
+    fieldnames = [
+        "workload",
+        "monthly_storage_cost",
+        "monthly_restore_cost",
+        "total_monthly_resilience_cost",
+    ]
+    writer = csv.DictWriter(stdout, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
 
-    # Normal mode (backwards-compatible simple run)
-    if args.tier is None or args.size_gb is None:
-        raise SystemExit(
-            "Normal mode requires --tier and --size-gb when no scenario-file is given."
+    for workload in workloads:
+        writer.writerow(
+            {
+                "workload": workload.workload,
+                "monthly_storage_cost": workload.monthly_storage_cost,
+                "monthly_restore_cost": workload.monthly_restore_cost,
+                "total_monthly_resilience_cost": workload.total_monthly_resilience_cost,
+            }
         )
 
-    pricing = get_default_pricing(args.tier)
-    inputs = RestoreInputs(
-        data_size_gb=args.size_gb,
-        bandwidth_mbps=args.bandwidth_mbps,
-        link_efficiency=args.efficiency or 0.7,
-        restore_destination=args.destination,
-        rto_hours=args.rto_hours,
-    )
-    result = estimate_restore(inputs, pricing)
 
-    if args.json:
-        payload = {
-            "inputs": {
-                "tier": args.tier,
-                "size_gb": args.size_gb,
-                "destination": args.destination,
-                "bandwidth_mbps": args.bandwidth_mbps,
-                "efficiency": args.efficiency or 0.7,
-                "rto_hours": args.rto_hours,
-            },
-            "result": {
-                "thaw_time_hours": result.thaw_time_hours,
-                "transfer_time_hours": result.transfer_time_hours,
-                "total_time_hours": result.total_time_hours,
-                "retrieval_cost_usd": result.retrieval_cost_usd,
-                "egress_cost_usd": result.egress_cost_usd,
-                "total_cost_usd": result.total_cost_usd,
-            },
-        }
-        print(json.dumps(payload, indent=2))
-        return
+def run_analyze(input_file: str, output_format: str, workload_column: str, stdout: TextIO) -> int:
+    workload_inputs = load_workloads(input_file=input_file, workload_column=workload_column)
+    workload_costs = [calculate_workload_cost(config) for config in workload_inputs]
 
-    print(f"Total restore time: {result.total_time_hours:.2f}h")
+    if output_format == "csv":
+        _emit_csv(workload_costs, stdout)
+        return EXIT_SUCCESS
+
+    payload = build_report_payload(workloads=workload_costs, input_file=input_file)
+
+    if output_format == "json":
+        _emit_json(payload, stdout)
+        return EXIT_SUCCESS
+
+    if output_format == "yaml":
+        _emit_yaml(payload, stdout)
+        return EXIT_SUCCESS
+
+    raise RuntimeError(f"Unsupported output format: {output_format}")
+
+
+def run(argv: Sequence[str] | None = None, stdout: TextIO = sys.stdout, stderr: TextIO = sys.stderr) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        if args.command == "analyze":
+            return run_analyze(
+                input_file=args.input,
+                output_format=args.output_format,
+                workload_column=args.workload_column,
+                stdout=stdout,
+            )
+        raise RuntimeError(f"Unsupported command: {args.command}")
+    except InputFileError as exc:
+        print(f"Input file error: {exc}", file=stderr)
+        return EXIT_INPUT_FILE_ERROR
+    except SchemaDataError as exc:
+        print(f"Schema/data error: {exc}", file=stderr)
+        return EXIT_SCHEMA_DATA_ERROR
+    except Exception as exc:  # pragma: no cover - hard to trigger deterministically
+        print(f"Internal/runtime error: {exc}", file=stderr)
+        return EXIT_INTERNAL_RUNTIME_ERROR
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    raise SystemExit(run(argv=argv))
 
 
 if __name__ == "__main__":
