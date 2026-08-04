@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, List
 
 SCHEMA_VERSION = "1.0"
@@ -25,7 +25,12 @@ def _round_money(value: float) -> float:
 
 
 def utc_now_iso8601() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 @dataclass(frozen=True)
@@ -84,7 +89,9 @@ def calculate_workload_cost(config: WorkloadConfig) -> WorkloadCost:
     total_monthly_resilience_cost = monthly_storage_cost + monthly_restore_cost
 
     total_rounded = _round_money(total_monthly_resilience_cost)
-    cost_per_gb = _round_money(total_rounded / config.data_gb) if config.data_gb > 0 else 0.0
+    cost_per_gb = (
+        _round_money(total_rounded / config.data_gb) if config.data_gb > 0 else 0.0
+    )
     cost_per_backup = (
         _round_money(total_rounded / config.backup_frequency_per_month)
         if config.backup_frequency_per_month > 0
@@ -129,7 +136,9 @@ def summarize_costs(workloads: List[WorkloadCost]) -> Dict[str, Any]:
     }
 
 
-def build_report_payload(workloads: List[WorkloadCost], input_file: str) -> Dict[str, Any]:
+def build_report_payload(
+    workloads: List[WorkloadCost], input_file: str
+) -> Dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "metadata": {

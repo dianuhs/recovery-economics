@@ -3,7 +3,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
@@ -32,3 +31,15 @@ def test_analyze_csv_output_per_workload_rows() -> None:
     assert rows[0]["total_monthly_resilience_cost"] == "24.5"
     assert rows[1]["workload"] == "billing-db"
     assert rows[1]["total_monthly_resilience_cost"] == "76.0"
+
+
+def test_compare_rejects_mismatched_workload_sets(tmp_path: Path) -> None:
+    baseline = FIXTURES_DIR / "simple_config.csv"
+    lines = baseline.read_text().splitlines()
+    proposed = tmp_path / "proposed.csv"
+    proposed.write_text("\n".join(lines[:-1]) + "\n")
+    result = run_cli(
+        "compare", "--baseline", str(baseline), "--proposed", str(proposed)
+    )
+    assert result.returncode == 4
+    assert "workload sets differ" in result.stderr

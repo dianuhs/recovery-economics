@@ -1,3 +1,9 @@
+"""Legacy starter assumptions; not used by the canonical v0.2 model.
+
+Rates in this module are not live, region-specific, or invoice evidence. Canonical
+scenarios require explicit, source-reviewed rates in their versioned input.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

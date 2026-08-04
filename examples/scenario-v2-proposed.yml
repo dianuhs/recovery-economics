@@ -1,0 +1,39 @@
+schema_version: recovery-economics/2.0
+scenario_id: illustrative-orders-db-proposed
+currency: USD
+workload:
+  id: orders-db
+  name: Illustrative Orders Database
+  criticality: critical
+  data_gb: 5000
+  rto_target_hours: 2
+  rpo_target_hours: 1
+backup:
+  frequency_hours: 1
+  retention_days: 30
+  full_backup_interval_days: 7
+  daily_change_percent: 3
+  compression_ratio: 0.65
+  deduplication_ratio: 0.7
+  storage_rate_per_gb_month: 0.03
+  request_cost_per_backup: 0.01
+recovery:
+  restore_gb: 5000
+  restore_throughput_gb_per_hour: 10000
+  retrieval_rate_per_gb: 0.01
+  compute_hours: 1
+  compute_rate_per_hour: 4
+  egress_gb: 0
+  egress_rate_per_gb: 0.09
+  failover_cost: 200
+  failback_cost: 200
+  orchestration_hours: 0.5
+risk:
+  recovery_events_per_year: 0.2
+  outage_impact_per_hour: 50000
+  uncertainty_percent: 25
+restore_test:
+  tested_at: 2026-07-20T12:00:00Z
+  restore_duration_hours: 1.8
+  recovered_point_age_hours: 0.8
+  result: passed
