@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recovery-economics"
-version = "0.1.0"
-description = "CSV-driven CLI for monthly backup/restore resilience cost modeling."
+version = "0.2.0"
+description = "Versioned resilience scenario economics and evidence modeling CLI."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 authors = [
-  { name = "Diana" }
+  { name = "Diana Molski" }
 ]
 keywords = ["finops", "cloud", "backup", "restore", "resilience", "cli"]
 classifiers = [
@@ -23,8 +23,28 @@ dependencies = [
   "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "black>=26,<27",
+  "flake8>=7,<8",
+  "isort>=6,<7",
+  "pip-audit>=2.10,<3",
+  "pytest>=8,<9",
+]
+
 [project.scripts]
 recovery-economics = "recovery_economics.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/cloudandcapital/recovery-economics"
+Repository = "https://github.com/cloudandcapital/recovery-economics.git"
+"Bug Tracker" = "https://github.com/cloudandcapital/recovery-economics/issues"
+
 [tool.setuptools]
 packages = ["recovery_economics"]
+
+[tool.black]
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"

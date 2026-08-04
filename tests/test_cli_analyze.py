@@ -3,7 +3,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
@@ -11,6 +10,12 @@ FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     cmd = [sys.executable, "-m", "recovery_economics", *args]
     return subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
+
+
+def test_version_option() -> None:
+    result = run_cli("--version")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "recovery-economics 0.2.0"
 
 
 def test_analyze_simple_config() -> None:
@@ -83,7 +88,9 @@ def test_analyze_requires_input_flag_exit2() -> None:
     assert "--input" in result.stderr
 
 
-def test_analyze_header_only_csv_returns_zero_workloads(tmp_path: Path) -> None:
+def test_analyze_header_only_csv_fails_instead_of_claiming_zero_workloads(
+    tmp_path: Path,
+) -> None:
     input_file = tmp_path / "header_only.csv"
     input_file.write_text(
         "workload,data_gb,backup_frequency_per_month,retention_months,"
@@ -99,7 +106,22 @@ def test_analyze_header_only_csv_returns_zero_workloads(tmp_path: Path) -> None:
         "json",
     )
 
-    assert result.returncode == 0, result.stderr
-    payload = json.loads(result.stdout)
-    assert payload["summary"]["total_workloads"] == 0
-    assert payload["workloads"] == []
+    assert result.returncode == 4
+    assert "no workload rows" in result.stderr
+
+
+def test_analyze_rejects_nan(tmp_path: Path) -> None:
+    source = (FIXTURES_DIR / "simple_config.csv").read_text()
+    target = tmp_path / "nan.csv"
+    target.write_text(source.replace("100", "NaN", 1))
+    result = run_cli("analyze", "--input", str(target), "--output-format", "json")
+    assert result.returncode == 4
+
+
+def test_analyze_rejects_duplicate_workload(tmp_path: Path) -> None:
+    lines = (FIXTURES_DIR / "simple_config.csv").read_text().splitlines()
+    target = tmp_path / "duplicate.csv"
+    target.write_text("\n".join(lines + [lines[1]]) + "\n")
+    result = run_cli("analyze", "--input", str(target), "--output-format", "json")
+    assert result.returncode == 4
+    assert "Duplicate workload" in result.stderr

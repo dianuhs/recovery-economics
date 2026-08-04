@@ -1,105 +1,146 @@
 # Recovery Economics
 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Multi-cloud](https://img.shields.io/badge/cloud-AWS%20%7C%20Azure%20%7C%20GCP-orange)](https://github.com/cloudandcapital/recovery-economics)
+Recovery Economics is an open-source resilience scenario and evidence engine. It models the economics of protecting and recovering a workload, tests modeled RTO/RPO against declared targets, and distinguishes scenario estimates from observed restore-test evidence.
 
-**FinOps decision-stress model — estimate the true monthly cost and time of cloud recovery, per workload.**
+For the complete six-tool demo and roadmap, see [Tech Spend Command Center](https://github.com/cloudandcapital/tech-spend-command-center).
 
-Part of the [Cloud & Capital](https://github.com/cloudandcapital) FinOps pipeline.  
-Resilience cost output feeds into [Cloud Cost Guard](https://github.com/cloudandcapital/cloud-cost-guard) — the unified FinOps dashboard.
+It does not inspect cloud accounts, mutate infrastructure, prove recoverability from assumptions, or add modeled resilience costs to observed technology spend.
 
----
+## What v0.2 calculates
 
-**Features:**
-- CSV-in, machine-readable output — no cloud API calls, no setup friction
-- Per-workload monthly resilience cost: backup storage + restore compute + egress
-- Scenario comparison — compare two configurations side by side with delta analysis
-- RPO/RTO modeling — surface the cost of meeting your recovery objectives
-- JSON, YAML, and CSV output — pipe-friendly with explicit exit codes
-- Evals mode for automated validation of model assumptions
+- Full plus incremental protected-storage footprint
+- Compression and deduplication effects
+- Backup request and storage design cost
+- Retrieval, compute, egress, failover, and failback cost per recovery event
+- Frequency-weighted monthly recovery execution cost
+- Modeled recovery time and backup interval versus RTO/RPO targets
+- Frequency-weighted monthly outage exposure
+- Low, expected, and high sensitivity values
+- Restore-test evidence, freshness, and demonstrated target gaps
 
----
+All scenario-derived financial metrics use `basis: estimated`. Supplied restore-test duration and recovered-point age use `basis: observed`. Neither is called verified savings.
 
 ## Install
 
-```bash
-pip install "git+https://github.com/cloudandcapital/recovery-economics.git"
-# or
-pipx install .
-```
-
----
-
-## Usage
+Python 3.10 or newer is required.
 
 ```bash
-# Model recovery cost for a set of workloads
-recovery-economics model --workload workloads.csv
-
-# Compare two recovery configurations
-recovery-economics compare --baseline current.csv --alternative proposed.csv
-
-# JSON output (feeds Cloud Cost Guard report.json)
-recovery-economics model --workload workloads.csv --format json
-
-# YAML output
-recovery-economics model --workload workloads.csv --format yaml
+pipx install "git+https://github.com/cloudandcapital/recovery-economics.git"
+recovery-economics --help
 ```
 
----
+For development from a clone:
 
-## Input CSV Format
-
-One row per workload:
-
-| Column | Description |
-|--------|-------------|
-| `workload` | Workload name |
-| `data_gb` | Total data size in GB |
-| `backup_frequency_per_month` | Number of backup cycles per month |
-| `backup_storage_tier` | `standard`, `infrequent`, or `archive` |
-| `restore_compute_hours` | Expected compute hours per restore |
-| `egress_gb_per_restore` | Data egress per restore in GB |
-| `rpo_hours` *(optional)* | Recovery point objective |
-| `rto_hours` *(optional)* | Recovery time objective |
-
----
-
-## Output
-
-```json
-{
-  "total_workloads": 5,
-  "total_monthly_resilience_cost": 4820.50,
-  "top_workloads": [
-    {
-      "workload": "prod-postgres",
-      "monthly_storage_cost": 1240.00,
-      "monthly_restore_cost": 380.00,
-      "total_monthly_resilience_cost": 1620.00,
-      "rpo_hours": 4,
-      "rto_hours": 2
-    }
-  ]
-}
+```bash
+python -m pip install -e ".[dev]"
 ```
 
----
+## Five-minute public demo
 
-## Part of the Cloud & Capital Pipeline
+```bash
+recovery-economics ccac --demo --output recovery-result.json
+```
 
-| Tool | Role |
-|------|------|
-| [FinOps Lite](https://github.com/cloudandcapital/finops-lite) | Cost pull + FOCUS 2026 export |
-| [FinOps Watchdog](https://github.com/cloudandcapital/finops-watchdog) | Anomaly detection |
-| **Recovery Economics** | Resilience cost modeling |
-| [Cloud Cost Guard](https://github.com/cloudandcapital/cloud-cost-guard) | Unified dashboard |
-| [AI Cost Lens](https://github.com/cloudandcapital/ai-cost-lens) | AI/LLM spend tracking |
-| [SaaS Cost Analyzer](https://github.com/cloudandcapital/saas-cost-analyzer) | SaaS license governance |
-| [Tech Spend Command Center](https://github.com/cloudandcapital/tech-spend-command-center) | Executive reporting |
+The acceptance suite validates this result against the shared CCAC reference schemas. Contributors may run `ccac validate recovery-result.json` after installing the separate CCAC reference package.
 
----
+**Illustrative sample resilience data. No customer accounts, credentials, billing exports, or production resources are connected.**
+
+The demo is deterministic and passes through the same calculator and CCAC producer as a local user scenario.
+
+## Analyze a local scenario
+
+```bash
+recovery-economics ccac \
+  --input examples/scenario-v2.yml \
+  --output recovery-result.json
+```
+
+Compare two strategies for the same workload:
+
+```bash
+recovery-economics compare-ccac \
+  --baseline examples/scenario-v2.yml \
+  --proposed examples/scenario-v2-proposed.yml \
+  --output comparison.json
+```
+
+The comparison reports baseline, proposed, and delta exposure alongside target-coverage regressions. A favorable modeled delta is not emitted as verified savings or an optimization opportunity.
+
+Input is file-first and read-only. YAML and JSON are supported. Required sections are:
+
+- `workload`: identity, criticality, data size, RTO, and RPO
+- `backup`: frequency, retention, full-backup interval, daily change, reduction ratios, storage and request rates
+- `recovery`: restore volume and throughput, retrieval, compute, egress, failover, failback, and orchestration assumptions
+- `risk`: event frequency, outage impact, and uncertainty
+- `restore_test`: optional observed test timestamp, duration, recovered-point age, and result
+
+Required numeric values never default to zero. Missing, non-numeric, negative, NaN, infinite, or out-of-range values fail closed.
+
+Rates are supplied explicitly by the user. Recovery Economics does not perform live cloud-pricing lookups; the older `aws_pricing.py` module contains legacy starter assumptions and is not used by the canonical model.
+
+## Core formulas
+
+```text
+effective stored GB =
+  (data GB × retained full copies
+   + data GB × daily change % × max(retention days - retained full copies, 0))
+  × compression ratio × deduplication ratio
+
+monthly design cost =
+  effective stored GB × storage rate
+  + monthly backup operations × request cost
+
+modeled RTO =
+  restore GB ÷ throughput + orchestration hours + compute hours
+
+recovery-event cost =
+  retrieval + restore compute + egress + failover + failback
+
+expected monthly outage exposure =
+  modeled RTO × outage impact per hour × annual recovery events ÷ 12
+```
+
+Each retained full copy represents one full-backup day. Daily changed data is
+modeled for the remaining retained days; the model does not simulate a more
+granular backup schedule within those days.
+
+Every formula and assumption is also included in the CCAC extension for auditability.
+
+## Accounting boundary
+
+`monthly_design_cost`, `expected_monthly_recovery_cost`, `expected_monthly_outage_exposure`, and `expected_monthly_economic_exposure` are scenario estimates. They are not AWS invoices and must not enter FinOps Lite’s observed cloud-spend total.
+
+Recovery Economics emits findings, but no optimization opportunities or remediation commands. A later comparison workflow may propose review-first alternatives with explicit overlap and approval controls.
+
+## Restore-test interpretation
+
+- Modeled RTO/RPO never demonstrate recoverability.
+- A fresh passing restore test is evidence of that test only, not a permanent guarantee.
+- Evidence older than 90 days is labeled stale.
+- Failed, partial, missing, stale, or future-dated evidence cannot substantiate recoverability.
+- Observed test duration and recovered-point age are compared directly with declared targets.
+
+## Legacy CSV compatibility
+
+The v0.1 commands remain available:
+
+```bash
+recovery-economics analyze --input examples/workload-config-sample.csv --output-format json
+recovery-economics compare --baseline current.csv --proposed proposed.csv
+```
+
+The legacy formula treats each retained backup as a full copy and is intentionally not the canonical v0.2 pipeline model. Legacy comparisons now require identical workload sets; missing rows are not interpreted as `$0`.
+
+## Pipeline compatibility
+
+Recovery Economics `0.2.x` emits a `ccac/1.0.0` tool result that Tech Spend Command Center `0.2.x` catalogs without adding modeled exposure to observed spend. The complete illustrative acceptance run passes independent validation. Cloud Cost Guard remains unchanged until its downstream adapter is reviewed separately.
+
+## Development
+
+```bash
+uv run --extra dev pytest
+```
 
 ## License
 
-MIT © 2025 Diana Molski, Cloud & Capital
+MIT © 2025–2026 Diana Molski, Cloud & Capital

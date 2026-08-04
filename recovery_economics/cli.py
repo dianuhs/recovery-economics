@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import sys
 from pathlib import Path
 from typing import List, Sequence, TextIO
@@ -12,6 +13,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
     yaml = None
 
+from . import __version__
+from .ccac import build_comparison_result
+from .ccac import build_result as build_ccac_result
+from .ccac import demo_result, load_scenario
 from .model import (
     DEFAULT_WORKLOAD_COLUMN,
     REQUIRED_NUMERIC_COLUMNS,
@@ -20,6 +25,7 @@ from .model import (
     build_report_payload,
     calculate_workload_cost,
 )
+from .scenario import ScenarioError, illustrative_scenario
 
 EXIT_SUCCESS = 0
 EXIT_USAGE_ERROR = 2
@@ -42,6 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Recovery Economics v0.1: calculate monthly resilience cost from local CSV input."
         ),
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -75,6 +84,29 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Path to the baseline scenario CSV file.",
     )
+
+    ccac = subparsers.add_parser(
+        "ccac", help="Model a versioned resilience scenario and emit CCAC JSON."
+    )
+    mode = ccac.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--demo", action="store_true", help="Use deterministic illustrative data."
+    )
+    mode.add_argument(
+        "--input", help="Read a recovery-economics/2.0 YAML or JSON scenario."
+    )
+    ccac.add_argument("--output", help="Write JSON to a file instead of stdout.")
+    ccac.add_argument("--run-id", help="Pipeline run UUID; generated when omitted.")
+    ccac.add_argument("--generated-at", help="RFC3339 timestamp for reproducible runs.")
+
+    compare_ccac = subparsers.add_parser(
+        "compare-ccac", help="Compare two v2 scenarios and emit CCAC JSON."
+    )
+    compare_ccac.add_argument("--baseline", required=True)
+    compare_ccac.add_argument("--proposed", required=True)
+    compare_ccac.add_argument("--output")
+    compare_ccac.add_argument("--run-id")
+    compare_ccac.add_argument("--generated-at")
     compare.add_argument(
         "--proposed",
         required=True,
@@ -89,7 +121,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_non_negative_float(raw_value: str | None, column_name: str, row_number: int) -> float:
+def _parse_non_negative_float(
+    raw_value: str | None, column_name: str, row_number: int
+) -> float:
     value_text = "" if raw_value is None else str(raw_value).strip()
     if value_text == "":
         raise SchemaDataError(
@@ -103,7 +137,7 @@ def _parse_non_negative_float(raw_value: str | None, column_name: str, row_numbe
             f"Row {row_number}: column '{column_name}' has non-numeric value '{value_text}'."
         ) from exc
 
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         raise SchemaDataError(
             f"Row {row_number}: column '{column_name}' must be >= 0, got {value_text}."
         )
@@ -144,7 +178,9 @@ def load_workloads(input_file: str, workload_column: str) -> List[WorkloadConfig
 
                 workload = WorkloadConfig(
                     workload=workload_name,
-                    data_gb=_parse_non_negative_float(row.get("data_gb"), "data_gb", row_number),
+                    data_gb=_parse_non_negative_float(
+                        row.get("data_gb"), "data_gb", row_number
+                    ),
                     backup_frequency_per_month=_parse_non_negative_float(
                         row.get("backup_frequency_per_month"),
                         "backup_frequency_per_month",
@@ -173,13 +209,23 @@ def load_workloads(input_file: str, workload_column: str) -> List[WorkloadConfig
                 )
                 workloads.append(workload)
 
+            if not workloads:
+                raise SchemaDataError("Input CSV contains no workload rows.")
+            names = [workload.workload for workload in workloads]
+            duplicates = sorted({name for name in names if names.count(name) > 1})
+            if duplicates:
+                raise SchemaDataError(
+                    f"Duplicate workload identifiers: {', '.join(duplicates)}"
+                )
             return workloads
     except FileNotFoundError as exc:
         raise InputFileError(f"File not found: {input_file}") from exc
     except PermissionError as exc:
         raise InputFileError(f"File is not readable: {input_file}") from exc
     except OSError as exc:
-        raise InputFileError(f"Could not read input file '{input_file}': {exc}") from exc
+        raise InputFileError(
+            f"Could not read input file '{input_file}': {exc}"
+        ) from exc
 
 
 def _emit_json(payload: dict, stdout: TextIO) -> None:
@@ -260,14 +306,29 @@ def _emit_csv(workloads: List[WorkloadCost], stdout: TextIO) -> None:
         )
 
 
-def run_compare(baseline_file: str, proposed_file: str, workload_column: str, stdout: TextIO) -> int:
-    baseline_inputs = load_workloads(input_file=baseline_file, workload_column=workload_column)
-    proposed_inputs = load_workloads(input_file=proposed_file, workload_column=workload_column)
+def run_compare(
+    baseline_file: str, proposed_file: str, workload_column: str, stdout: TextIO
+) -> int:
+    baseline_inputs = load_workloads(
+        input_file=baseline_file, workload_column=workload_column
+    )
+    proposed_inputs = load_workloads(
+        input_file=proposed_file, workload_column=workload_column
+    )
 
     baseline_costs = {c.workload: calculate_workload_cost(c) for c in baseline_inputs}
     proposed_costs = {c.workload: calculate_workload_cost(c) for c in proposed_inputs}
 
     all_workloads = sorted(set(baseline_costs) | set(proposed_costs))
+    if set(baseline_costs) != set(proposed_costs):
+        missing_baseline = sorted(set(proposed_costs) - set(baseline_costs))
+        missing_proposed = sorted(set(baseline_costs) - set(proposed_costs))
+        details = []
+        if missing_baseline:
+            details.append(f"missing from baseline: {', '.join(missing_baseline)}")
+        if missing_proposed:
+            details.append(f"missing from proposed: {', '.join(missing_proposed)}")
+        raise SchemaDataError("Scenario workload sets differ; " + "; ".join(details))
 
     rows = []
     for workload in all_workloads:
@@ -302,8 +363,12 @@ def run_compare(baseline_file: str, proposed_file: str, workload_column: str, st
     return EXIT_SUCCESS
 
 
-def run_analyze(input_file: str, output_format: str, workload_column: str, stdout: TextIO) -> int:
-    workload_inputs = load_workloads(input_file=input_file, workload_column=workload_column)
+def run_analyze(
+    input_file: str, output_format: str, workload_column: str, stdout: TextIO
+) -> int:
+    workload_inputs = load_workloads(
+        input_file=input_file, workload_column=workload_column
+    )
     workload_costs = [calculate_workload_cost(config) for config in workload_inputs]
 
     if output_format == "csv":
@@ -323,7 +388,56 @@ def run_analyze(input_file: str, output_format: str, workload_column: str, stdou
     raise RuntimeError(f"Unsupported output format: {output_format}")
 
 
-def run(argv: Sequence[str] | None = None, stdout: TextIO = sys.stdout, stderr: TextIO = sys.stderr) -> int:
+def run_ccac(args: argparse.Namespace, stdout: TextIO) -> int:
+    if args.demo and args.run_id is None and args.generated_at is None:
+        payload = demo_result()
+    elif args.demo:
+        payload = build_ccac_result(
+            illustrative_scenario(),
+            mode="illustrative",
+            run_id=args.run_id,
+            generated_at=args.generated_at,
+        )
+    else:
+        payload = build_ccac_result(
+            load_scenario(Path(args.input)),
+            mode="real",
+            run_id=args.run_id,
+            generated_at=args.generated_at,
+        )
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        target = Path(args.output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered, encoding="utf-8")
+    else:
+        stdout.write(rendered)
+    return EXIT_SUCCESS
+
+
+def run_compare_ccac(args: argparse.Namespace, stdout: TextIO) -> int:
+    payload = build_comparison_result(
+        load_scenario(Path(args.baseline)),
+        load_scenario(Path(args.proposed)),
+        mode="real",
+        run_id=args.run_id,
+        generated_at=args.generated_at,
+    )
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        target = Path(args.output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered, encoding="utf-8")
+    else:
+        stdout.write(rendered)
+    return EXIT_SUCCESS
+
+
+def run(
+    argv: Sequence[str] | None = None,
+    stdout: TextIO = sys.stdout,
+    stderr: TextIO = sys.stderr,
+) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -342,12 +456,19 @@ def run(argv: Sequence[str] | None = None, stdout: TextIO = sys.stdout, stderr: 
                 workload_column=args.workload_column,
                 stdout=stdout,
             )
+        if args.command == "ccac":
+            return run_ccac(args, stdout)
+        if args.command == "compare-ccac":
+            return run_compare_ccac(args, stdout)
         raise RuntimeError(f"Unsupported command: {args.command}")
     except InputFileError as exc:
         print(f"Input file error: {exc}", file=stderr)
         return EXIT_INPUT_FILE_ERROR
     except SchemaDataError as exc:
         print(f"Schema/data error: {exc}", file=stderr)
+        return EXIT_SCHEMA_DATA_ERROR
+    except ScenarioError as exc:
+        print(f"Scenario error: {exc}", file=stderr)
         return EXIT_SCHEMA_DATA_ERROR
     except Exception as exc:  # pragma: no cover - hard to trigger deterministically
         print(f"Internal/runtime error: {exc}", file=stderr)

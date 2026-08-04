@@ -1,4 +1,8 @@
-from recovery_economics.model import WorkloadConfig, calculate_workload_cost, summarize_costs
+from recovery_economics.model import (
+    WorkloadConfig,
+    calculate_workload_cost,
+    summarize_costs,
+)
 
 
 def test_calculate_workload_cost_math() -> None:
