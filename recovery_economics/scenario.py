@@ -229,10 +229,10 @@ def calculate_scenario(source: Mapping[str, Any]) -> ScenarioResult:
         + failover_cost
         + failback_cost
     )
-    monthly_probability = events_year / Decimal("12")
-    expected_recovery = event_cost * monthly_probability
+    expected_events_per_month = events_year / Decimal("12")
+    expected_recovery = event_cost * expected_events_per_month
     outage_event = modeled_rto * outage_hour
-    expected_outage = outage_event * monthly_probability
+    expected_outage = outage_event * expected_events_per_month
     exposure = design_cost + expected_recovery + expected_outage
 
     restore_test = source.get("restore_test")
@@ -279,6 +279,7 @@ def calculate_scenario(source: Mapping[str, Any]) -> ScenarioResult:
         "full_copies_retained": number(full_copies),
         "monthly_backup_operations": number(backups_month),
         "recovery_events_per_year": number(events_year),
+        "expected_events_per_month": number(expected_events_per_month),
         "uncertainty_percent": number(uncertainty * 100),
     }
     return ScenarioResult(

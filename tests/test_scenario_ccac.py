@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from decimal import Decimal
 from io import StringIO
 
 import pytest
@@ -81,6 +82,43 @@ def test_full_copy_interval_and_reduction_factors_materially_change_storage():
     alternative["backup"]["deduplication_ratio"] = 1
     unreduced = calculate_scenario(alternative)
     assert unreduced.effective_stored_gb > baseline.effective_stored_gb
+
+
+def test_effective_storage_exactly_reconciles_to_documented_formula():
+    source = illustrative_scenario()
+    result = calculate_scenario(source)
+    retained_full_copies = Decimal("5")
+    remaining_retained_days = max(Decimal("30") - retained_full_copies, Decimal("0"))
+    documented = (
+        (
+            Decimal("5000") * retained_full_copies
+            + Decimal("5000") * Decimal("3") / Decimal("100") * remaining_retained_days
+        )
+        * Decimal("0.65")
+        * Decimal("0.7")
+    )
+    assert documented == Decimal("13081.25000")
+    assert result.effective_stored_gb == documented
+
+
+def test_expected_event_frequency_scales_without_probability_bound():
+    source = illustrative_scenario()
+    source["risk"]["recovery_events_per_year"] = 24
+    result = calculate_scenario(source)
+    assert result.assumptions["expected_events_per_month"] == 2.0
+    assert result.expected_monthly_recovery_cost == result.recovery_event_cost * 2
+    assert result.expected_monthly_outage_exposure == result.outage_impact_per_event * 2
+
+
+def test_financial_outputs_stay_estimated_without_savings_classification():
+    payload = demo_result()
+    financial_metrics = [
+        metric for metric in payload["metrics"] if metric["unit"] == "currency"
+    ]
+    assert financial_metrics
+    assert all(metric["basis"] == "estimated" for metric in financial_metrics)
+    assert payload["opportunities"] == []
+    assert "savings" not in json.dumps(financial_metrics).lower()
 
 
 def test_demo_json_round_trip():

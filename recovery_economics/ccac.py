@@ -300,7 +300,7 @@ def build_result(
         ),
         _metric(
             f"{prefix}.expected-monthly-recovery-cost",
-            "Probability-weighted monthly recovery execution cost",
+            "Frequency-weighted monthly recovery execution cost",
             money(result.expected_monthly_recovery_cost),
             "currency",
             result.currency,
@@ -313,7 +313,7 @@ def build_result(
         ),
         _metric(
             f"{prefix}.expected-monthly-outage-exposure",
-            "Probability-weighted monthly outage exposure",
+            "Frequency-weighted monthly outage exposure",
             money(result.expected_monthly_outage_exposure),
             "currency",
             result.currency,

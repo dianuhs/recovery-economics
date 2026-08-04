@@ -12,9 +12,9 @@ It does not inspect cloud accounts, mutate infrastructure, prove recoverability 
 - Compression and deduplication effects
 - Backup request and storage design cost
 - Retrieval, compute, egress, failover, and failback cost per recovery event
-- Probability-weighted monthly recovery execution cost
+- Frequency-weighted monthly recovery execution cost
 - Modeled recovery time and backup interval versus RTO/RPO targets
-- Probability-weighted outage exposure
+- Frequency-weighted monthly outage exposure
 - Low, expected, and high sensitivity values
 - Restore-test evidence, freshness, and demonstrated target gaps
 
@@ -82,7 +82,8 @@ Rates are supplied explicitly by the user. Recovery Economics does not perform l
 
 ```text
 effective stored GB =
-  (data GB × retained full copies + data GB × daily change % × retention days)
+  (data GB × retained full copies
+   + data GB × daily change % × max(retention days - retained full copies, 0))
   × compression ratio × deduplication ratio
 
 monthly design cost =
@@ -98,6 +99,10 @@ recovery-event cost =
 expected monthly outage exposure =
   modeled RTO × outage impact per hour × annual recovery events ÷ 12
 ```
+
+Each retained full copy represents one full-backup day. Daily changed data is
+modeled for the remaining retained days; the model does not simulate a more
+granular backup schedule within those days.
 
 Every formula and assumption is also included in the CCAC extension for auditability.
 

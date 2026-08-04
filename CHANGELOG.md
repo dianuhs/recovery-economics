@@ -5,13 +5,14 @@ All notable changes to Recovery Economics are documented here.
 ## [Unreleased]
 
 - Add a standard `recovery-economics --version` installation smoke check.
+- Correct event-frequency terminology and align the documented protected-storage formula with the canonical implementation.
 
 ## [0.2.0] — 2026-08-04
 
 ### Added
 - Versioned `recovery-economics/2.0` YAML/JSON scenario input.
 - Deterministic `ccac --demo` and read-only local `ccac --input` paths.
-- Full/incremental storage, reduction ratios, requests, retrieval, compute, egress, failover/failback, RTO/RPO, probability-weighted exposure, sensitivity, and restore-test evidence modeling.
+- Full/incremental storage, reduction ratios, requests, retrieval, compute, egress, failover/failback, RTO/RPO, frequency-weighted exposure, sensitivity, and restore-test evidence modeling.
 - CCAC `tool_result` output with source hash, formulas, assumptions, evidence freshness, findings, and explicit accounting boundary.
 - Canonical `compare-ccac` baseline/proposed strategy analysis with target-regression findings and estimated deltas that remain outside verified savings.
 
