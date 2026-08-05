@@ -4,10 +4,17 @@ All notable changes to Recovery Economics are documented here.
 
 ## [Unreleased]
 
-- Add a standard `recovery-economics --version` installation smoke check.
-- Correct event-frequency terminology and align the documented protected-storage formula with the canonical implementation.
+## [0.2.1] — 2026-08-05
+
+- Correct the public CLI help identity with version-neutral wording and advance
+  package version surfaces to `0.2.1`.
+- This release does not alter calculations, modeling, CCAC structure, trust
+  behavior, or remediation semantics.
 
 ## [0.2.0] — 2026-08-04
+
+- Add a standard `recovery-economics --version` installation smoke check.
+- Correct event-frequency terminology and align the documented protected-storage formula with the canonical implementation.
 
 ### Added
 - Versioned `recovery-economics/2.0` YAML/JSON scenario input.

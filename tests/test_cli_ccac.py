@@ -22,7 +22,7 @@ def test_ccac_demo_stdout_is_valid_json_and_deterministic():
     second = run_cli("ccac", "--demo")
     assert first.returncode == 0, first.stderr
     assert first.stdout == second.stdout
-    assert json.loads(first.stdout)["producer"]["version"] == "0.2.0"
+    assert json.loads(first.stdout)["producer"]["version"] == "0.2.1"
 
 
 def test_ccac_demo_writes_only_to_output_file(tmp_path):

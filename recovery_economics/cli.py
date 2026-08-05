@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="recovery-economics",
         description=(
-            "Recovery Economics v0.1: calculate monthly resilience cost from local CSV input."
+            "Model resilience scenario economics, RTO/RPO targets, and restore evidence."
         ),
     )
     parser.add_argument(
