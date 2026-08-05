@@ -20,12 +20,14 @@ It does not inspect cloud accounts, mutate infrastructure, prove recoverability 
 
 All scenario-derived financial metrics use `basis: estimated`. Supplied restore-test duration and recovered-point age use `basis: observed`. Neither is called verified savings.
 
-## Install
+The public demo is credential-free and uses entirely illustrative data.
+
+## Install the released CLI
 
 Python 3.10 or newer is required.
 
 ```bash
-pipx install "git+https://github.com/cloudandcapital/recovery-economics.git"
+pipx install "git+https://github.com/cloudandcapital/recovery-economics.git@v0.2.1"
 recovery-economics --help
 ```
 
@@ -40,6 +42,9 @@ python -m pip install -e ".[dev]"
 ```bash
 recovery-economics ccac --demo --output recovery-result.json
 ```
+
+The command writes `recovery-result.json`; rerunning with the same path
+replaces that explicitly named local file.
 
 The acceptance suite validates this result against the shared CCAC reference schemas. Contributors may run `ccac validate recovery-result.json` after installing the separate CCAC reference package.
 
