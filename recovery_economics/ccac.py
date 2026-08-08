@@ -21,7 +21,14 @@ from .scenario import (
     number,
 )
 
-CONTRACT = "ccac/1.0.0"
+CONTRACTS = {"1.0.0": "ccac/1.0.0", "1.1.0": "ccac/1.1.0"}
+CONTRACT = CONTRACTS["1.0.0"]
+LEGACY_VERSION = "0.2.1"
+ILLUSTRATIVE_RUN_PERIOD = {
+    "start": "2026-07-01",
+    "end": "2026-07-22",
+    "timezone": "UTC",
+}
 
 
 def load_scenario(path: Path) -> dict[str, Any]:
@@ -106,13 +113,48 @@ def _metric(
     }
 
 
-def build_result(
+def _canonical(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(
+        _json_safe(dict(value)),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode()
+
+
+def _half_open_period(value: Mapping[str, Any] | None, field: str) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise ScenarioError(f"{field} is required")
+    try:
+        start = date.fromisoformat(str(value.get("start")))
+        end = date.fromisoformat(str(value.get("end")))
+    except ValueError as exc:
+        raise ScenarioError(f"{field} must use ISO dates") from exc
+    if end <= start or value.get("timezone", "UTC") != "UTC":
+        raise ScenarioError(f"{field} must be start-inclusive, end-exclusive, and UTC")
+    return {"start": start.isoformat(), "end": end.isoformat(), "timezone": "UTC"}
+
+
+def _monthly_period(day: date) -> dict[str, str]:
+    start = day.replace(day=1)
+    end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return {"start": start.isoformat(), "end": end.isoformat(), "timezone": "UTC"}
+
+
+def _build_result(
     source: Mapping[str, Any],
     *,
     mode: str,
     run_id: str | None = None,
     generated_at: str | None = None,
+    contract_version: str = "1.0.0",
+    document_period: Mapping[str, Any] | None = None,
+    legacy_provenance: bool = False,
 ) -> dict[str, Any]:
+    if contract_version not in CONTRACTS:
+        raise ScenarioError(
+            f"unsupported CCAC contract version: {contract_version!r}; expected 1.0.0 or 1.1.0"
+        )
     if mode not in {"illustrative", "real"}:
         raise ScenarioError("mode must be illustrative or real")
     result = calculate_scenario(source)
@@ -121,19 +163,25 @@ def build_result(
     except (ValueError, TypeError) as exc:
         raise ScenarioError("run_id must be a UUID") from exc
     generated = _timestamp(generated_at)
-    source_bytes = json.dumps(
-        dict(source), sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode()
+    source_bytes = _canonical(source)
     digest = hashlib.sha256(source_bytes).hexdigest()
     component = _id(result.workload_id)
     source_id = "source.recovery-economics.scenario"
     evidence_id = "evidence.recovery-economics.scenario-input"
     today = datetime.fromisoformat(generated.replace("Z", "+00:00")).date()
-    period = {
-        "start": today.replace(day=1).isoformat(),
-        "end": (today.replace(day=28) + timedelta(days=4)).replace(day=1).isoformat(),
-        "timezone": "UTC",
-    }
+    if contract_version == "1.1.0":
+        run_period = _half_open_period(
+            document_period
+            or (ILLUSTRATIVE_RUN_PERIOD if mode == "illustrative" else None),
+            "CCAC 1.1 document period",
+        )
+        metric_period = _monthly_period(date.fromisoformat(run_period["start"]))
+    else:
+        if document_period is not None:
+            raise ScenarioError("document period is supported only for CCAC 1.1")
+        metric_period = _monthly_period(today)
+        run_period = metric_period
+    producer_version = LEGACY_VERSION if legacy_provenance else __version__
     dims = {
         "scope": "resilience_scenario",
         "workload": result.workload_id,
@@ -150,7 +198,7 @@ def build_result(
             None,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             result.formulas["effective_stored_gb"],
             evidence_id,
@@ -163,7 +211,7 @@ def build_result(
             result.currency,
             "estimated",
             "additive",
-            period,
+            metric_period,
             dims,
             result.formulas["monthly_design_cost"],
             evidence_id,
@@ -176,7 +224,7 @@ def build_result(
             result.currency,
             "estimated",
             "additive",
-            period,
+            metric_period,
             dims,
             "effective_stored_gb * storage_rate_per_gb_month",
             evidence_id,
@@ -189,7 +237,7 @@ def build_result(
             result.currency,
             "estimated",
             "additive",
-            period,
+            metric_period,
             dims,
             "monthly_backup_operations * request_cost_per_backup",
             evidence_id,
@@ -202,7 +250,7 @@ def build_result(
             None,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             result.formulas["modeled_rto_hours"],
             evidence_id,
@@ -215,7 +263,7 @@ def build_result(
             None,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "backup.frequency_hours",
             evidence_id,
@@ -228,7 +276,7 @@ def build_result(
             result.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             result.formulas["recovery_event_cost"],
             evidence_id,
@@ -241,7 +289,7 @@ def build_result(
             result.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "restore_gb * retrieval_rate_per_gb",
             evidence_id,
@@ -254,7 +302,7 @@ def build_result(
             result.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "compute_hours * compute_rate_per_hour",
             evidence_id,
@@ -267,7 +315,7 @@ def build_result(
             result.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "egress_gb * egress_rate_per_gb",
             evidence_id,
@@ -280,7 +328,7 @@ def build_result(
             result.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "recovery.failover_cost",
             evidence_id,
@@ -293,7 +341,7 @@ def build_result(
             result.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "recovery.failback_cost",
             evidence_id,
@@ -306,7 +354,7 @@ def build_result(
             result.currency,
             "estimated",
             "additive",
-            period,
+            metric_period,
             dims,
             "recovery_event_cost * recovery_events_per_year / 12",
             evidence_id,
@@ -319,7 +367,7 @@ def build_result(
             result.currency,
             "estimated",
             "additive",
-            period,
+            metric_period,
             dims,
             result.formulas["expected_monthly_outage_exposure"],
             evidence_id,
@@ -332,7 +380,7 @@ def build_result(
             result.currency,
             "estimated",
             "additive",
-            period,
+            metric_period,
             dims,
             "monthly_design_cost + expected_monthly_recovery_cost + expected_monthly_outage_exposure",
             evidence_id,
@@ -392,7 +440,7 @@ def build_result(
                     None,
                     "observed",
                     "non_additive",
-                    period,
+                    metric_period,
                     dims,
                     None,
                     test_evidence_id,
@@ -405,7 +453,7 @@ def build_result(
                     None,
                     "observed",
                     "non_additive",
-                    period,
+                    metric_period,
                     dims,
                     None,
                     test_evidence_id,
@@ -508,20 +556,47 @@ def build_result(
                 "last_observed_at": generated,
             }
         )
+    extension = {
+        "rto_target_met": result.rto_met,
+        "rpo_target_met": result.rpo_met,
+        "restore_test": result.restore_test,
+        "restore_test_freshness": restore_freshness,
+        "sensitivity": {
+            "low": money(result.sensitivity_low),
+            "expected": money(result.expected_monthly_economic_exposure),
+            "high": money(result.sensitivity_high),
+            "currency": result.currency,
+        },
+        "assumptions": result.assumptions,
+        "formulas": result.formulas,
+        "accounting_boundary": "Modeled scenario values are excluded from observed technology spend totals.",
+    }
+    if contract_version == "1.1.0":
+        extension.update(
+            {
+                "organizational_coverage": "partial",
+                "total_eligible": False,
+                "document_period_role": "pipeline_analysis_window",
+                "metric_period_role": "monthly_modeled_scenario_horizon",
+                "metric_period": metric_period,
+                "observed_billing": False,
+                "live_system_access": False,
+            }
+        )
     return {
-        "contract": CONTRACT,
+        "contract": CONTRACTS[contract_version],
         "document_type": "tool_result",
-        "producer": {"name": "recovery-economics", "version": __version__},
+        "producer": {"name": "recovery-economics", "version": producer_version},
         "run_id": rid,
         "generated_at": generated,
         "mode": mode,
-        "period": period,
+        "period": run_period,
         "inputs": [
             {
                 "id": source_id,
                 "source_type": "resilience_scenario",
                 "source_version": str(source["schema_version"]),
-                "adapter_version": __version__,
+                "adapter_version": producer_version,
                 "content_sha256": digest,
                 "access": (
                     "illustrative_fixture"
@@ -544,32 +619,181 @@ def build_result(
         "findings": findings,
         "opportunities": [],
         "evidence": evidence,
-        "extensions": {
-            "recovery_economics": {
-                "rto_target_met": result.rto_met,
-                "rpo_target_met": result.rpo_met,
-                "restore_test": result.restore_test,
-                "restore_test_freshness": restore_freshness,
-                "sensitivity": {
-                    "low": money(result.sensitivity_low),
-                    "expected": money(result.expected_monthly_economic_exposure),
-                    "high": money(result.sensitivity_high),
-                    "currency": result.currency,
-                },
-                "assumptions": result.assumptions,
-                "formulas": result.formulas,
-                "accounting_boundary": "Modeled scenario values are excluded from observed technology spend totals.",
-            }
-        },
+        "extensions": {"recovery_economics": extension},
     }
 
 
-def demo_result() -> dict[str, Any]:
+def _unique_ids(items: Any, field: str) -> set[str]:
+    if not isinstance(items, list):
+        raise ScenarioError(f"{field} must be an array")
+    identities = [
+        str(item.get("id") or "") for item in items if isinstance(item, Mapping)
+    ]
+    if len(identities) != len(items) or any(not item for item in identities):
+        raise ScenarioError(f"{field} identities are required")
+    if len(identities) != len(set(identities)):
+        raise ScenarioError(f"{field} identities must be unique")
+    return set(identities)
+
+
+def validate_result(
+    payload: Mapping[str, Any],
+    source: Mapping[str, Any],
+    *,
+    contract_version: str,
+    legacy_provenance: bool = False,
+) -> None:
+    if contract_version not in CONTRACTS:
+        raise ScenarioError(f"unsupported CCAC contract version: {contract_version!r}")
+    if payload.get("contract") != CONTRACTS[contract_version]:
+        raise ScenarioError(
+            "CCAC output contract does not match the requested contract"
+        )
+    if payload.get("document_type") != "tool_result":
+        raise ScenarioError("CCAC output document_type must be tool_result")
+    expected_version = LEGACY_VERSION if legacy_provenance else __version__
+    if payload.get("producer") != {
+        "name": "recovery-economics",
+        "version": expected_version,
+    }:
+        raise ScenarioError("CCAC output producer declaration is invalid")
+    mode = payload.get("mode")
+    if mode not in {"illustrative", "real"}:
+        raise ScenarioError("CCAC output mode must be illustrative or real")
+    try:
+        uuid.UUID(str(payload.get("run_id")))
+    except (ValueError, TypeError) as exc:
+        raise ScenarioError("CCAC output run_id must be a UUID") from exc
+    _half_open_period(payload.get("period"), "CCAC output period")
+    source_ids = _unique_ids(payload.get("inputs"), "source")
+    evidence_ids = _unique_ids(payload.get("evidence"), "evidence")
+    metric_ids = _unique_ids(payload.get("metrics"), "metric")
+    finding_ids = _unique_ids(payload.get("findings"), "finding")
+    if len(finding_ids) != len(payload.get("findings", [])):
+        raise ScenarioError("finding inventory is invalid")
+    expected_access = (
+        ("illustrative_fixture", "public_illustrative")
+        if mode == "illustrative"
+        else ("local_read_only", "customer_confidential")
+    )
+    source_digest = hashlib.sha256(_canonical(source)).hexdigest()
+    for item in payload["inputs"]:
+        if (item.get("access"), item.get("data_classification")) != expected_access:
+            raise ScenarioError(
+                "source access and classification contradict output mode"
+            )
+        if item.get("content_sha256") != source_digest:
+            raise ScenarioError(
+                "source content hash does not match normalized scenario"
+            )
+    for item in payload["evidence"]:
+        refs = item.get("source_ids")
+        if (
+            not isinstance(refs, list)
+            or not refs
+            or any(ref not in source_ids for ref in refs)
+        ):
+            raise ScenarioError(
+                "evidence contains a missing or unknown source reference"
+            )
+        if item.get("content_sha256") != source_digest:
+            raise ScenarioError(
+                "evidence content hash does not match normalized scenario"
+            )
+    for item in payload["metrics"]:
+        refs = item.get("evidence_ids")
+        inputs = item.get("input_metric_ids", [])
+        if (
+            not isinstance(refs, list)
+            or not refs
+            or any(ref not in evidence_ids for ref in refs)
+        ):
+            raise ScenarioError(
+                "metric contains a missing or unknown evidence reference"
+            )
+        if not isinstance(inputs, list) or any(ref not in metric_ids for ref in inputs):
+            raise ScenarioError("metric contains an unknown metric reference")
+    for item in payload["findings"]:
+        if any(ref not in metric_ids for ref in item.get("metric_ids", [])):
+            raise ScenarioError("finding contains an unknown metric reference")
+        if any(ref not in evidence_ids for ref in item.get("evidence_ids", [])):
+            raise ScenarioError("finding contains an unknown evidence reference")
+    serialized = json.dumps(payload, sort_keys=True)
+    if any(
+        forbidden in serialized
+        for forbidden in (
+            "metric.tech-spend.scope.",
+            "canonical_scope_spend",
+            "technology_spend_total",
+        )
+    ):
+        raise ScenarioError(
+            "Recovery Economics must not emit canonical technology spend"
+        )
+    if payload.get("opportunities") != []:
+        raise ScenarioError(
+            "Recovery Economics must not emit optimization opportunities"
+        )
+    extension = payload.get("extensions", {}).get("recovery_economics", {})
+    if contract_version == "1.1.0" and (
+        extension.get("organizational_coverage") != "partial"
+        or extension.get("total_eligible") is not False
+    ):
+        raise ScenarioError(
+            "Recovery Economics must remain partial and total-ineligible"
+        )
+    document_period = payload.get("period") if contract_version == "1.1.0" else None
+    expected = _build_result(
+        source,
+        mode=str(mode),
+        run_id=str(payload["run_id"]),
+        generated_at=str(payload.get("generated_at")),
+        contract_version=contract_version,
+        document_period=document_period,
+        legacy_provenance=legacy_provenance,
+    )
+    if payload != expected:
+        raise ScenarioError(
+            "CCAC output contradicts independently recomputed scenario results"
+        )
+
+
+def build_result(
+    source: Mapping[str, Any],
+    *,
+    mode: str,
+    run_id: str | None = None,
+    generated_at: str | None = None,
+    contract_version: str = "1.0.0",
+    document_period: Mapping[str, Any] | None = None,
+    legacy_provenance: bool = False,
+) -> dict[str, Any]:
+    payload = _build_result(
+        source,
+        mode=mode,
+        run_id=run_id,
+        generated_at=generated_at,
+        contract_version=contract_version,
+        document_period=document_period,
+        legacy_provenance=legacy_provenance,
+    )
+    validate_result(
+        payload,
+        source,
+        contract_version=contract_version,
+        legacy_provenance=legacy_provenance,
+    )
+    return payload
+
+
+def demo_result(contract_version: str = "1.0.0") -> dict[str, Any]:
     return build_result(
         illustrative_scenario(),
         mode="illustrative",
         run_id="123e4567-e89b-12d3-a456-426614174020",
         generated_at="2026-08-04T12:10:00Z",
+        contract_version=contract_version,
+        legacy_provenance=contract_version == "1.0.0",
     )
 
 
@@ -580,7 +804,13 @@ def build_comparison_result(
     mode: str,
     run_id: str | None = None,
     generated_at: str | None = None,
+    contract_version: str = "1.0.0",
+    document_period: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if contract_version not in CONTRACTS:
+        raise ScenarioError(
+            f"unsupported CCAC contract version: {contract_version!r}; expected 1.0.0 or 1.1.0"
+        )
     baseline = calculate_scenario(baseline_source)
     proposed = calculate_scenario(proposed_source)
     if baseline.workload_id != proposed.workload_id:
@@ -595,19 +825,18 @@ def build_comparison_result(
         raise ScenarioError("run_id must be a UUID") from exc
     generated = _timestamp(generated_at)
     today = datetime.fromisoformat(generated.replace("Z", "+00:00")).date()
-    period = {
-        "start": today.replace(day=1).isoformat(),
-        "end": (today.replace(day=28) + timedelta(days=4)).replace(day=1).isoformat(),
-        "timezone": "UTC",
-    }
+    if contract_version == "1.1.0":
+        run_period = _half_open_period(document_period, "CCAC 1.1 document period")
+        metric_period = _monthly_period(date.fromisoformat(run_period["start"]))
+    else:
+        if document_period is not None:
+            raise ScenarioError("document period is supported only for CCAC 1.1")
+        metric_period = _monthly_period(today)
+        run_period = metric_period
     sources = []
     evidence = []
     for label, raw in (("baseline", baseline_source), ("proposed", proposed_source)):
-        digest = hashlib.sha256(
-            json.dumps(
-                dict(raw), sort_keys=True, separators=(",", ":"), ensure_ascii=False
-            ).encode()
-        ).hexdigest()
+        digest = hashlib.sha256(_canonical(raw)).hexdigest()
         sid = f"source.recovery-economics.{label}-scenario"
         eid = f"evidence.recovery-economics.{label}-scenario"
         sources.append(
@@ -663,7 +892,7 @@ def build_comparison_result(
             baseline.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "baseline monthly design cost + expected recovery cost + expected outage exposure",
             "evidence.recovery-economics.baseline-scenario",
@@ -676,7 +905,7 @@ def build_comparison_result(
             proposed.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "proposed monthly design cost + expected recovery cost + expected outage exposure",
             "evidence.recovery-economics.proposed-scenario",
@@ -692,7 +921,7 @@ def build_comparison_result(
             baseline.currency,
             "estimated",
             "non_additive",
-            period,
+            metric_period,
             dims,
             "proposed exposure - baseline exposure",
             "evidence.recovery-economics.proposed-scenario",
@@ -736,47 +965,58 @@ def build_comparison_result(
                 "last_observed_at": generated,
             }
         )
+    extension = {
+        "comparison": {
+            "baseline": {
+                "scenario_id": baseline.scenario_id,
+                "rto_target_met": baseline.rto_met,
+                "rpo_target_met": baseline.rpo_met,
+                "monthly_design_cost": money(baseline.monthly_design_cost),
+                "expected_monthly_exposure": money(
+                    baseline.expected_monthly_economic_exposure
+                ),
+            },
+            "proposed": {
+                "scenario_id": proposed.scenario_id,
+                "rto_target_met": proposed.rto_met,
+                "rpo_target_met": proposed.rpo_met,
+                "monthly_design_cost": money(proposed.monthly_design_cost),
+                "expected_monthly_exposure": money(
+                    proposed.expected_monthly_economic_exposure
+                ),
+            },
+            "delta": money(
+                proposed.expected_monthly_economic_exposure
+                - baseline.expected_monthly_economic_exposure
+            ),
+        },
+        "accounting_boundary": "Comparison deltas are modeled estimates and excluded from observed technology spend and verified savings.",
+    }
+    if contract_version == "1.1.0":
+        extension.update(
+            {
+                "organizational_coverage": "partial",
+                "total_eligible": False,
+                "document_period_role": "pipeline_analysis_window",
+                "metric_period_role": "monthly_modeled_scenario_horizon",
+                "metric_period": metric_period,
+                "observed_billing": False,
+                "live_system_access": False,
+            }
+        )
     return {
-        "contract": CONTRACT,
+        "contract": CONTRACTS[contract_version],
         "document_type": "tool_result",
         "producer": {"name": "recovery-economics", "version": __version__},
         "run_id": rid,
         "generated_at": generated,
         "mode": mode,
-        "period": period,
+        "period": run_period,
         "inputs": sources,
         "quality": {"status": "valid", "issues": []},
         "metrics": metrics,
         "findings": findings,
         "opportunities": [],
         "evidence": evidence,
-        "extensions": {
-            "recovery_economics": {
-                "comparison": {
-                    "baseline": {
-                        "scenario_id": baseline.scenario_id,
-                        "rto_target_met": baseline.rto_met,
-                        "rpo_target_met": baseline.rpo_met,
-                        "monthly_design_cost": money(baseline.monthly_design_cost),
-                        "expected_monthly_exposure": money(
-                            baseline.expected_monthly_economic_exposure
-                        ),
-                    },
-                    "proposed": {
-                        "scenario_id": proposed.scenario_id,
-                        "rto_target_met": proposed.rto_met,
-                        "rpo_target_met": proposed.rpo_met,
-                        "monthly_design_cost": money(proposed.monthly_design_cost),
-                        "expected_monthly_exposure": money(
-                            proposed.expected_monthly_economic_exposure
-                        ),
-                    },
-                    "delta": money(
-                        proposed.expected_monthly_economic_exposure
-                        - baseline.expected_monthly_economic_exposure
-                    ),
-                },
-                "accounting_boundary": "Comparison deltas are modeled estimates and excluded from observed technology spend and verified savings.",
-            }
-        },
+        "extensions": {"recovery_economics": extension},
     }

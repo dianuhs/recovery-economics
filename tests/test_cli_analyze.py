@@ -15,7 +15,7 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
 def test_version_option() -> None:
     result = run_cli("--version")
     assert result.returncode == 0
-    assert result.stdout.strip() == "recovery-economics 0.2.1"
+    assert result.stdout.strip() == "recovery-economics 0.3.0"
 
 
 def test_top_level_help_has_version_neutral_current_identity() -> None:

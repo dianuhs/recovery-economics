@@ -6,7 +6,7 @@ For the complete six-tool demo and roadmap, see [Tech Spend Command Center](http
 
 It does not inspect cloud accounts, mutate infrastructure, prove recoverability from assumptions, or add modeled resilience costs to observed technology spend.
 
-## What v0.2 calculates
+## What v0.3 calculates
 
 - Full plus incremental protected-storage footprint
 - Compression and deduplication effects
@@ -41,6 +41,13 @@ python -m pip install -e ".[dev]"
 
 ```bash
 recovery-economics ccac --demo --output recovery-result.json
+```
+
+CCAC 1.0 remains the default. Select the diagnostic-only CCAC 1.1 bridge
+explicitly when assembling a future unified run:
+
+```bash
+recovery-economics ccac --demo --contract-version 1.1.0 --output recovery-result-1.1.json
 ```
 
 The command writes `recovery-result.json`; rerunning with the same path
@@ -113,7 +120,7 @@ Every formula and assumption is also included in the CCAC extension for auditabi
 
 ## Accounting boundary
 
-`monthly_design_cost`, `expected_monthly_recovery_cost`, `expected_monthly_outage_exposure`, and `expected_monthly_economic_exposure` are scenario estimates. They are not AWS invoices and must not enter FinOps Lite’s observed cloud-spend total.
+`monthly_design_cost`, `expected_monthly_recovery_cost`, `expected_monthly_outage_exposure`, and `expected_monthly_economic_exposure` are scenario estimates. They are not invoices and must not enter canonical technology-spend totals.
 
 Recovery Economics emits findings, but no optimization opportunities or remediation commands. A later comparison workflow may propose review-first alternatives with explicit overlap and approval controls.
 
@@ -138,7 +145,18 @@ The legacy formula treats each retained backup as a full copy and is intentional
 
 ## Pipeline compatibility
 
-Recovery Economics `0.2.x` emits a `ccac/1.0.0` tool result that Tech Spend Command Center `0.2.x` catalogs without adding modeled exposure to observed spend. The complete illustrative acceptance run passes independent validation. Cloud Cost Guard remains unchanged until its downstream adapter is reviewed separately.
+Recovery Economics `0.3.x` supports explicit `ccac/1.0.0` and `ccac/1.1.0`
+tool results. CCAC 1.0 remains the default for compatibility. The 1.1 path is a
+diagnostic bridge for a future unified pipeline: its run-level period can align
+with that pipeline while every metric retains an explicit monthly modeled
+period and estimated basis. Recovery Economics contributes no Cloud,
+direct-AI, SaaS, or total technology spend.
+
+The tool reads only illustrative or user-supplied local files. It does not
+inspect accounts, mutate infrastructure, query billing exports or provider
+APIs, perform live pricing lookups, or prove recoverability. Tech Spend Command
+Center `0.2.x` continues to support the existing CCAC 1.0 pipeline; CCAC 1.1
+Command Center integration is a separate later phase.
 
 ## Development
 

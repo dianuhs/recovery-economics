@@ -25,6 +25,40 @@ def test_ccac_demo_stdout_is_valid_json_and_deterministic():
     assert json.loads(first.stdout)["producer"]["version"] == "0.2.1"
 
 
+def test_explicit_1_0_demo_is_byte_identical_to_default():
+    default = run_cli("ccac", "--demo")
+    explicit = run_cli("ccac", "--demo", "--contract-version", "1.0.0")
+    assert default.returncode == explicit.returncode == 0
+    assert default.stdout == explicit.stdout
+
+
+def test_explicit_1_1_demo_uses_pipeline_period_and_new_version():
+    result = run_cli("ccac", "--demo", "--contract-version", "1.1.0")
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["contract"] == "ccac/1.1.0"
+    assert payload["producer"]["version"] == "0.3.0"
+    assert payload["period"] == {
+        "start": "2026-07-01",
+        "end": "2026-07-22",
+        "timezone": "UTC",
+    }
+
+
+def test_real_1_1_cli_requires_complete_period():
+    result = run_cli(
+        "ccac",
+        "--input",
+        str(ROOT / "examples" / "scenario-v2.yml"),
+        "--contract-version",
+        "1.1.0",
+        "--period-start",
+        "2026-07-01",
+    )
+    assert result.returncode == 4
+    assert "must be supplied together" in result.stderr
+
+
 def test_ccac_demo_writes_only_to_output_file(tmp_path):
     target = tmp_path / "result.json"
     result = run_cli("ccac", "--demo", "--output", str(target))

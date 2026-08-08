@@ -4,6 +4,17 @@ All notable changes to Recovery Economics are documented here.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-07
+
+- Add explicit CCAC 1.0 and diagnostic-only CCAC 1.1 output while retaining
+  CCAC 1.0 as the default and preserving the approved legacy demonstration
+  byte-for-byte.
+- Keep the CCAC 1.1 document period aligned with the future pipeline while
+  labeling scenario metrics with their truthful monthly modeled period.
+- Preserve Recovery Economics as a partial, total-ineligible diagnostic
+  producer with no canonical technology-spend metrics or opportunities.
+- Add fail-closed output reconciliation and exact released-CCAC validation.
+
 ## [0.2.1] — 2026-08-05
 
 - Correct the public CLI help identity with version-neutral wording and advance
