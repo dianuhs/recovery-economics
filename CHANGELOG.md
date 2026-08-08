@@ -4,6 +4,22 @@ All notable changes to Recovery Economics are documented here.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-07
+
+- Add explicit CCAC 1.0 and diagnostic-only CCAC 1.1 output while retaining
+  CCAC 1.0 as the default and preserving the approved legacy demonstration
+  byte-for-byte.
+- Keep the CCAC 1.1 document period aligned with the future pipeline while
+  labeling scenario estimates with their monthly modeled period and observed
+  restore-test metrics with their observation-day period.
+- Preserve Recovery Economics as a partial, total-ineligible diagnostic
+  producer with no canonical technology-spend metrics or opportunities.
+- Add fail-closed output reconciliation and exact released-CCAC validation.
+- Keep `compare-ccac` limited to its established CCAC 1.0 behavior.
+- Use Hatchling because fixed-epoch A/B builds with the original setuptools
+  backend produced identical wheels but nondeterministic sdists; Hatchling
+  makes both artifact types byte-reproducible.
+
 ## [0.2.1] — 2026-08-05
 
 - Correct the public CLI help identity with version-neutral wording and advance

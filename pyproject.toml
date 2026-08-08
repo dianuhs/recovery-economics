@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=64.0.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "recovery-economics"
-version = "0.2.1"
+version = "0.3.0"
 description = "Versioned resilience scenario economics and evidence modeling CLI."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,9 +39,6 @@ recovery-economics = "recovery_economics.cli:main"
 Homepage = "https://github.com/cloudandcapital/recovery-economics"
 Repository = "https://github.com/cloudandcapital/recovery-economics.git"
 "Bug Tracker" = "https://github.com/cloudandcapital/recovery-economics/issues"
-
-[tool.setuptools]
-packages = ["recovery_economics"]
 
 [tool.black]
 target-version = ["py310"]

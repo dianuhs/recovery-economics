@@ -95,6 +95,14 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--input", help="Read a recovery-economics/2.0 YAML or JSON scenario."
     )
+    ccac.add_argument(
+        "--contract-version",
+        choices=("1.0.0", "1.1.0"),
+        default="1.0.0",
+        help="CCAC contract to emit (default: 1.0.0).",
+    )
+    ccac.add_argument("--period-start", help="CCAC 1.1 pipeline period start date.")
+    ccac.add_argument("--period-end", help="CCAC 1.1 pipeline period end date.")
     ccac.add_argument("--output", help="Write JSON to a file instead of stdout.")
     ccac.add_argument("--run-id", help="Pipeline run UUID; generated when omitted.")
     ccac.add_argument("--generated-at", help="RFC3339 timestamp for reproducible runs.")
@@ -389,14 +397,23 @@ def run_analyze(
 
 
 def run_ccac(args: argparse.Namespace, stdout: TextIO) -> int:
-    if args.demo and args.run_id is None and args.generated_at is None:
-        payload = demo_result()
+    document_period = _document_period(args)
+    if (
+        args.demo
+        and args.run_id is None
+        and args.generated_at is None
+        and document_period is None
+    ):
+        payload = demo_result(args.contract_version)
     elif args.demo:
         payload = build_ccac_result(
             illustrative_scenario(),
             mode="illustrative",
             run_id=args.run_id,
             generated_at=args.generated_at,
+            contract_version=args.contract_version,
+            document_period=document_period,
+            legacy_provenance=args.contract_version == "1.0.0",
         )
     else:
         payload = build_ccac_result(
@@ -404,6 +421,8 @@ def run_ccac(args: argparse.Namespace, stdout: TextIO) -> int:
             mode="real",
             run_id=args.run_id,
             generated_at=args.generated_at,
+            contract_version=args.contract_version,
+            document_period=document_period,
         )
     rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     if args.output:
@@ -431,6 +450,16 @@ def run_compare_ccac(args: argparse.Namespace, stdout: TextIO) -> int:
     else:
         stdout.write(rendered)
     return EXIT_SUCCESS
+
+
+def _document_period(args: argparse.Namespace) -> dict[str, str] | None:
+    start = getattr(args, "period_start", None)
+    end = getattr(args, "period_end", None)
+    if bool(start) != bool(end):
+        raise ScenarioError("period-start and period-end must be supplied together")
+    if start is None:
+        return None
+    return {"start": start, "end": end, "timezone": "UTC"}
 
 
 def run(
