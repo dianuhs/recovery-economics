@@ -146,11 +146,13 @@ The legacy formula treats each retained backup as a full copy and is intentional
 ## Pipeline compatibility
 
 Recovery Economics `0.3.x` supports explicit `ccac/1.0.0` and `ccac/1.1.0`
-tool results. CCAC 1.0 remains the default for compatibility. The 1.1 path is a
-diagnostic bridge for a future unified pipeline: its run-level period can align
-with that pipeline while every metric retains an explicit monthly modeled
-period and estimated basis. Recovery Economics contributes no Cloud,
-direct-AI, SaaS, or total technology spend.
+standard diagnostic tool results. CCAC 1.0 remains the default for
+compatibility, and `compare-ccac` remains CCAC 1.0 only. The standard 1.1 path
+is a diagnostic bridge for a future unified pipeline: its run-level period can
+align with that pipeline while modeled metrics retain an explicit monthly
+horizon and observed restore-test metrics retain their observation-day period.
+Recovery Economics contributes no Cloud, direct-AI, SaaS, or total technology
+spend.
 
 The tool reads only illustrative or user-supplied local files. It does not
 inspect accounts, mutate infrastructure, query billing exports or provider

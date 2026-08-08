@@ -45,14 +45,31 @@ def test_1_1_is_deterministic_diagnostic_only_and_period_truthful() -> None:
     assert extension["total_eligible"] is False
     assert extension["observed_billing"] is False
     assert extension["live_system_access"] is False
+    modeled_period = {
+        "start": "2026-07-01",
+        "end": "2026-08-01",
+        "timezone": "UTC",
+    }
+    observed_period = {
+        "start": "2026-06-15",
+        "end": "2026-06-16",
+        "timezone": "UTC",
+    }
     for metric in first["metrics"]:
-        assert metric["period"] == {
-            "start": "2026-07-01",
-            "end": "2026-08-01",
-            "timezone": "UTC",
-        }
+        expected_period = (
+            observed_period if metric["basis"] == "observed" else modeled_period
+        )
+        assert metric["period"] == expected_period
         if metric["unit"] == "currency":
             assert metric["basis"] == "estimated"
+    assert extension["modeled_metric_period"] == modeled_period
+    assert extension["observed_restore_metric_period"] == observed_period
+    assert extension["modeled_metric_period_role"] == (
+        "monthly_modeled_scenario_horizon"
+    )
+    assert extension["observed_restore_metric_period_role"] == (
+        "restore_test_observation_day"
+    )
     serialized = canonical(first)
     for forbidden in (
         "metric.tech-spend.scope.",
@@ -114,6 +131,11 @@ def test_unsupported_contract_fails_closed(version: str) -> None:
         (lambda p: p.update(run_id="not-a-uuid"), "run_id"),
         (lambda p: p.update(mode="live"), "mode"),
         (lambda p: p["period"].update(end="2026-07-01"), "end-exclusive"),
+        (lambda p: p["metrics"][0]["period"].update(end="2026-07-31"), "metric period"),
+        (
+            lambda p: p["metrics"][-1]["period"].update(end="2026-06-17"),
+            "metric period",
+        ),
         (lambda p: p["inputs"][0].update(access="provider_api"), "access"),
         (
             lambda p: p["inputs"][0].update(
@@ -133,8 +155,8 @@ def test_unsupported_contract_fails_closed(version: str) -> None:
             lambda p: p["findings"][0].update(metric_ids=["metric.unknown"]),
             "metric reference",
         ),
-        (lambda p: p["metrics"][0].update(basis="observed"), "recomputed"),
-        (lambda p: p["metrics"][-1].update(basis="estimated"), "recomputed"),
+        (lambda p: p["metrics"][0].update(basis="observed"), "basis"),
+        (lambda p: p["metrics"][-1].update(basis="estimated"), "basis"),
         (lambda p: p["metrics"][1].update(currency="EUR"), "recomputed"),
         (lambda p: p["metrics"][1].update(value=-1), "recomputed"),
         (lambda p: p["metrics"][1].update(formula="invoice amount"), "recomputed"),
@@ -172,7 +194,7 @@ def test_invalid_1_1_financial_input_fails_closed(value: object) -> None:
         build_result(source, mode="illustrative", contract_version="1.1.0")
 
 
-def test_comparison_1_1_is_estimated_and_not_savings() -> None:
+def test_comparison_remains_ccac_1_0_only() -> None:
     baseline = illustrative_scenario()
     proposed = copy.deepcopy(baseline)
     proposed["scenario_id"] = "proposed"
@@ -183,9 +205,8 @@ def test_comparison_1_1_is_estimated_and_not_savings() -> None:
         mode="real",
         run_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         generated_at="2026-07-22T00:00:00Z",
-        contract_version="1.1.0",
-        document_period=ILLUSTRATIVE_RUN_PERIOD,
     )
+    assert payload["contract"] == "ccac/1.0.0"
     assert all(metric["basis"] == "estimated" for metric in payload["metrics"])
     assert payload["opportunities"] == []
     assert (
@@ -225,6 +246,23 @@ def test_non_substantiating_restore_evidence_stays_truthful(
     extension = payload["extensions"]["recovery_economics"]
     assert extension["restore_test_freshness"]["status"] == expected_status
     assert any("not substantiated" in item["title"] for item in payload["findings"])
+    observed = [
+        metric for metric in payload["metrics"] if metric["basis"] == "observed"
+    ]
+    if variant == "missing":
+        assert observed == []
+        assert extension["observed_restore_metric_period"] is None
+    else:
+        expected_start = "2025-01-01" if variant == "stale" else "2026-06-15"
+        expected_end = "2025-01-02" if variant == "stale" else "2026-06-16"
+        expected_period = {
+            "start": expected_start,
+            "end": expected_end,
+            "timezone": "UTC",
+        }
+        assert observed
+        assert all(metric["period"] == expected_period for metric in observed)
+        assert extension["observed_restore_metric_period"] == expected_period
 
 
 def test_future_restore_evidence_fails_closed_in_1_1() -> None:
@@ -238,3 +276,10 @@ def test_future_restore_evidence_fails_closed_in_1_1() -> None:
             contract_version="1.1.0",
             document_period=ILLUSTRATIVE_RUN_PERIOD,
         )
+
+
+def test_restore_evidence_timestamp_requires_timezone_in_1_1() -> None:
+    source = illustrative_scenario()
+    source["restore_test"]["tested_at"] = "2026-06-15T12:00:00"
+    with pytest.raises(ScenarioError, match="include a timezone"):
+        build_result(source, mode="illustrative", contract_version="1.1.0")

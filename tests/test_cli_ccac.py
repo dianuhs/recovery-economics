@@ -108,3 +108,18 @@ def test_compare_ccac_runs_with_versioned_scenarios(tmp_path):
         ]
         is True
     )
+    assert payload["contract"] == "ccac/1.0.0"
+
+
+def test_compare_ccac_does_not_expose_ccac_1_1_selection():
+    result = run_cli(
+        "compare-ccac",
+        "--baseline",
+        str(ROOT / "examples" / "scenario-v2.yml"),
+        "--proposed",
+        str(ROOT / "examples" / "scenario-v2-proposed.yml"),
+        "--contract-version",
+        "1.1.0",
+    )
+    assert result.returncode == 2
+    assert "unrecognized arguments" in result.stderr

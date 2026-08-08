@@ -115,16 +115,6 @@ def build_parser() -> argparse.ArgumentParser:
     compare_ccac.add_argument("--output")
     compare_ccac.add_argument("--run-id")
     compare_ccac.add_argument("--generated-at")
-    compare_ccac.add_argument(
-        "--contract-version",
-        choices=("1.0.0", "1.1.0"),
-        default="1.0.0",
-        help="CCAC contract to emit (default: 1.0.0).",
-    )
-    compare_ccac.add_argument(
-        "--period-start", help="CCAC 1.1 pipeline period start date."
-    )
-    compare_ccac.add_argument("--period-end", help="CCAC 1.1 pipeline period end date.")
     compare.add_argument(
         "--proposed",
         required=True,
@@ -451,8 +441,6 @@ def run_compare_ccac(args: argparse.Namespace, stdout: TextIO) -> int:
         mode="real",
         run_id=args.run_id,
         generated_at=args.generated_at,
-        contract_version=args.contract_version,
-        document_period=_document_period(args),
     )
     rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     if args.output:

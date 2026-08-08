@@ -141,6 +141,21 @@ def _monthly_period(day: date) -> dict[str, str]:
     return {"start": start.isoformat(), "end": end.isoformat(), "timezone": "UTC"}
 
 
+def _observation_period(value: str) -> dict[str, str]:
+    try:
+        observed_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ScenarioError("restore_test.tested_at must be RFC3339") from exc
+    if observed_at.tzinfo is None:
+        raise ScenarioError("restore_test.tested_at must include a timezone")
+    observed_day = observed_at.astimezone(timezone.utc).date()
+    return {
+        "start": observed_day.isoformat(),
+        "end": (observed_day + timedelta(days=1)).isoformat(),
+        "timezone": "UTC",
+    }
+
+
 def _build_result(
     source: Mapping[str, Any],
     *,
@@ -402,11 +417,13 @@ def _build_result(
         "age_days": None,
         "freshness_threshold_days": 90,
     }
+    observed_metric_period = None
     test_evidence_id = "evidence.recovery-economics.restore-test"
     if result.restore_test is not None:
         tested_at = datetime.fromisoformat(
             result.restore_test["tested_at"].replace("Z", "+00:00")
         )
+        observed_metric_period = _observation_period(result.restore_test["tested_at"])
         age_days = (
             datetime.fromisoformat(generated.replace("Z", "+00:00")) - tested_at
         ).days
@@ -440,7 +457,11 @@ def _build_result(
                     None,
                     "observed",
                     "non_additive",
-                    metric_period,
+                    (
+                        observed_metric_period
+                        if contract_version == "1.1.0"
+                        else metric_period
+                    ),
                     dims,
                     None,
                     test_evidence_id,
@@ -453,7 +474,11 @@ def _build_result(
                     None,
                     "observed",
                     "non_additive",
-                    metric_period,
+                    (
+                        observed_metric_period
+                        if contract_version == "1.1.0"
+                        else metric_period
+                    ),
                     dims,
                     None,
                     test_evidence_id,
@@ -577,8 +602,10 @@ def _build_result(
                 "organizational_coverage": "partial",
                 "total_eligible": False,
                 "document_period_role": "pipeline_analysis_window",
-                "metric_period_role": "monthly_modeled_scenario_horizon",
-                "metric_period": metric_period,
+                "modeled_metric_period_role": "monthly_modeled_scenario_horizon",
+                "modeled_metric_period": metric_period,
+                "observed_restore_metric_period_role": "restore_test_observation_day",
+                "observed_restore_metric_period": observed_metric_period,
                 "observed_billing": False,
                 "live_system_access": False,
             }
@@ -713,6 +740,34 @@ def validate_result(
             )
         if not isinstance(inputs, list) or any(ref not in metric_ids for ref in inputs):
             raise ScenarioError("metric contains an unknown metric reference")
+    if contract_version == "1.1.0":
+        modeled_period = _monthly_period(date.fromisoformat(payload["period"]["start"]))
+        restore_test = source.get("restore_test")
+        observed_period = (
+            _observation_period(str(restore_test.get("tested_at")))
+            if isinstance(restore_test, Mapping)
+            else None
+        )
+        observed_metric_ids = {
+            metric_id
+            for metric_id in metric_ids
+            if metric_id.endswith(".tested-restore-duration-hours")
+            or metric_id.endswith(".tested-recovered-point-age-hours")
+        }
+        if observed_period is None and observed_metric_ids:
+            raise ScenarioError("restore-test metrics require restore-test evidence")
+        for item in payload["metrics"]:
+            is_observed_restore = item["id"] in observed_metric_ids
+            expected_period = observed_period if is_observed_restore else modeled_period
+            expected_basis = "observed" if is_observed_restore else "estimated"
+            if item.get("period") != expected_period:
+                raise ScenarioError(
+                    "metric period contradicts its modeled or observed meaning"
+                )
+            if item.get("basis") != expected_basis:
+                raise ScenarioError(
+                    "metric basis contradicts its modeled or observed meaning"
+                )
     for item in payload["findings"]:
         if any(ref not in metric_ids for ref in item.get("metric_ids", [])):
             raise ScenarioError("finding contains an unknown metric reference")
@@ -804,13 +859,7 @@ def build_comparison_result(
     mode: str,
     run_id: str | None = None,
     generated_at: str | None = None,
-    contract_version: str = "1.0.0",
-    document_period: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if contract_version not in CONTRACTS:
-        raise ScenarioError(
-            f"unsupported CCAC contract version: {contract_version!r}; expected 1.0.0 or 1.1.0"
-        )
     baseline = calculate_scenario(baseline_source)
     proposed = calculate_scenario(proposed_source)
     if baseline.workload_id != proposed.workload_id:
@@ -825,18 +874,15 @@ def build_comparison_result(
         raise ScenarioError("run_id must be a UUID") from exc
     generated = _timestamp(generated_at)
     today = datetime.fromisoformat(generated.replace("Z", "+00:00")).date()
-    if contract_version == "1.1.0":
-        run_period = _half_open_period(document_period, "CCAC 1.1 document period")
-        metric_period = _monthly_period(date.fromisoformat(run_period["start"]))
-    else:
-        if document_period is not None:
-            raise ScenarioError("document period is supported only for CCAC 1.1")
-        metric_period = _monthly_period(today)
-        run_period = metric_period
+    period = _monthly_period(today)
     sources = []
     evidence = []
     for label, raw in (("baseline", baseline_source), ("proposed", proposed_source)):
-        digest = hashlib.sha256(_canonical(raw)).hexdigest()
+        digest = hashlib.sha256(
+            json.dumps(
+                dict(raw), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()
+        ).hexdigest()
         sid = f"source.recovery-economics.{label}-scenario"
         eid = f"evidence.recovery-economics.{label}-scenario"
         sources.append(
@@ -892,7 +938,7 @@ def build_comparison_result(
             baseline.currency,
             "estimated",
             "non_additive",
-            metric_period,
+            period,
             dims,
             "baseline monthly design cost + expected recovery cost + expected outage exposure",
             "evidence.recovery-economics.baseline-scenario",
@@ -905,7 +951,7 @@ def build_comparison_result(
             proposed.currency,
             "estimated",
             "non_additive",
-            metric_period,
+            period,
             dims,
             "proposed monthly design cost + expected recovery cost + expected outage exposure",
             "evidence.recovery-economics.proposed-scenario",
@@ -921,7 +967,7 @@ def build_comparison_result(
             baseline.currency,
             "estimated",
             "non_additive",
-            metric_period,
+            period,
             dims,
             "proposed exposure - baseline exposure",
             "evidence.recovery-economics.proposed-scenario",
@@ -965,58 +1011,47 @@ def build_comparison_result(
                 "last_observed_at": generated,
             }
         )
-    extension = {
-        "comparison": {
-            "baseline": {
-                "scenario_id": baseline.scenario_id,
-                "rto_target_met": baseline.rto_met,
-                "rpo_target_met": baseline.rpo_met,
-                "monthly_design_cost": money(baseline.monthly_design_cost),
-                "expected_monthly_exposure": money(
-                    baseline.expected_monthly_economic_exposure
-                ),
-            },
-            "proposed": {
-                "scenario_id": proposed.scenario_id,
-                "rto_target_met": proposed.rto_met,
-                "rpo_target_met": proposed.rpo_met,
-                "monthly_design_cost": money(proposed.monthly_design_cost),
-                "expected_monthly_exposure": money(
-                    proposed.expected_monthly_economic_exposure
-                ),
-            },
-            "delta": money(
-                proposed.expected_monthly_economic_exposure
-                - baseline.expected_monthly_economic_exposure
-            ),
-        },
-        "accounting_boundary": "Comparison deltas are modeled estimates and excluded from observed technology spend and verified savings.",
-    }
-    if contract_version == "1.1.0":
-        extension.update(
-            {
-                "organizational_coverage": "partial",
-                "total_eligible": False,
-                "document_period_role": "pipeline_analysis_window",
-                "metric_period_role": "monthly_modeled_scenario_horizon",
-                "metric_period": metric_period,
-                "observed_billing": False,
-                "live_system_access": False,
-            }
-        )
     return {
-        "contract": CONTRACTS[contract_version],
+        "contract": CONTRACT,
         "document_type": "tool_result",
         "producer": {"name": "recovery-economics", "version": __version__},
         "run_id": rid,
         "generated_at": generated,
         "mode": mode,
-        "period": run_period,
+        "period": period,
         "inputs": sources,
         "quality": {"status": "valid", "issues": []},
         "metrics": metrics,
         "findings": findings,
         "opportunities": [],
         "evidence": evidence,
-        "extensions": {"recovery_economics": extension},
+        "extensions": {
+            "recovery_economics": {
+                "comparison": {
+                    "baseline": {
+                        "scenario_id": baseline.scenario_id,
+                        "rto_target_met": baseline.rto_met,
+                        "rpo_target_met": baseline.rpo_met,
+                        "monthly_design_cost": money(baseline.monthly_design_cost),
+                        "expected_monthly_exposure": money(
+                            baseline.expected_monthly_economic_exposure
+                        ),
+                    },
+                    "proposed": {
+                        "scenario_id": proposed.scenario_id,
+                        "rto_target_met": proposed.rto_met,
+                        "rpo_target_met": proposed.rpo_met,
+                        "monthly_design_cost": money(proposed.monthly_design_cost),
+                        "expected_monthly_exposure": money(
+                            proposed.expected_monthly_economic_exposure
+                        ),
+                    },
+                    "delta": money(
+                        proposed.expected_monthly_economic_exposure
+                        - baseline.expected_monthly_economic_exposure
+                    ),
+                },
+                "accounting_boundary": "Comparison deltas are modeled estimates and excluded from observed technology spend and verified savings.",
+            }
+        },
     }
